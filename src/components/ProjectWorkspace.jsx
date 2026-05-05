@@ -22,8 +22,8 @@ import DocumentsTab from "./workspace/DocumentsTab";
 import SiteGalleryTab from "./workspace/SiteGalleryTab";
 import ChatModule from "./workspace/ChatModule";
 
-import { 
-    Box, Typography, Button, Paper, Dialog, DialogTitle, DialogContent, 
+import {
+    Box, Typography, Button, Paper, Dialog, DialogTitle, DialogContent,
     DialogActions, FormControlLabel, Checkbox, IconButton, Tooltip,
     List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divider, Chip
 } from "@mui/material";
@@ -313,16 +313,15 @@ export default function ProjectWorkspace({ projectId, onBack }) {
 
     return (
         <Box sx={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>
-            
+
             {/* 🔥 OPTIMIZED INTERNAL PROJECT SIDEBAR */}
-            <Paper 
+            <Paper
                 elevation={0}
-                sx={{ 
+                sx={{
                     width: sidebarOpen ? SIDEBAR_OPEN_WIDTH : { xs: 0, md: SIDEBAR_CLOSED_WIDTH },
                     flexShrink: 0,
                     bgcolor: 'rgba(13, 31, 60, 0.5)',
                     borderRight: '1px solid', borderColor: 'divider',
-                    // Smooth cubic-bezier transition
                     transition: 'width 0.225s cubic-bezier(0.4, 0, 0.2, 1)',
                     overflowX: 'hidden',
                     display: 'flex', flexDirection: 'column',
@@ -333,19 +332,19 @@ export default function ProjectWorkspace({ projectId, onBack }) {
                 }}
             >
                 <Box sx={{ p: 1, display: 'flex', justifyContent: sidebarOpen ? 'flex-end' : 'center', alignItems: 'center', height: 60 }}>
-                    <IconButton onClick={() => setSidebarOpen(!sidebarOpen)} sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' }}}>
+                    <IconButton onClick={() => setSidebarOpen(!sidebarOpen)} sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
                         {sidebarOpen ? <MenuOpenIcon /> : <MenuIcon />}
                     </IconButton>
                 </Box>
-                
+
                 {/* 🔥 FIXED SCROLLBAR HIDING */}
-                <Box sx={{ 
-                    flexGrow: 1, 
-                    overflowY: 'auto', 
-                    overflowX: 'hidden', 
+                <Box sx={{
+                    flexGrow: 1,
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
                     pb: 2,
-                    scrollbarWidth: 'none', // Firefox
-                    '&::-webkit-scrollbar': { display: 'none' } // Chrome, Safari, Edge
+                    scrollbarWidth: 'none',
+                    '&::-webkit-scrollbar': { display: 'none' }
                 }}>
                     <List sx={{ px: 1 }}>
                         {Object.entries(ALLOWED_CATEGORIES).map(([catKey, cat]) => (
@@ -361,22 +360,22 @@ export default function ProjectWorkspace({ projectId, onBack }) {
                                 {cat.children.map(child => (
                                     <Tooltip key={child.id} title={!sidebarOpen ? child.label : ""} placement="right" disableInteractive>
                                         <ListItem disablePadding sx={{ mb: 0.5 }}>
-                                            <ListItemButton 
-                                                onClick={() => { setActiveTab(child.id); if (window.innerWidth < 900) setSidebarOpen(false); }} 
+                                            <ListItemButton
+                                                onClick={() => { setActiveTab(child.id); if (window.innerWidth < 900) setSidebarOpen(false); }}
                                                 selected={activeTab === child.id}
-                                                sx={{ 
+                                                sx={{
                                                     borderRadius: 1.5, minHeight: 40, justifyContent: sidebarOpen ? 'initial' : 'center', px: 2.5,
                                                     '&.Mui-selected': { bgcolor: `rgba(${parseInt(cat.color.slice(1, 3), 16)}, ${parseInt(cat.color.slice(3, 5), 16)}, ${parseInt(cat.color.slice(5, 7), 16)}, 0.15)` },
-                                                    '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' } 
+                                                    '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
                                                 }}
                                             >
                                                 <ListItemIcon sx={{ minWidth: 0, mr: sidebarOpen ? 2 : 'auto', justifyContent: 'center', color: activeTab === child.id ? cat.color : 'text.secondary' }}>
                                                     {child.icon}
                                                 </ListItemIcon>
-                                                <ListItemText 
-                                                    primary={child.label} 
+                                                <ListItemText
+                                                    primary={child.label}
                                                     sx={{ opacity: sidebarOpen ? 1 : 0, transition: 'opacity 0.2s ease-in-out', m: 0 }}
-                                                    primaryTypographyProps={{ sx: { fontFamily: "'Inter', sans-serif", fontSize: '13px', fontWeight: activeTab === child.id ? 'bold' : 'normal', color: activeTab === child.id ? cat.color : 'text.primary', whiteSpace: 'nowrap' } }} 
+                                                    primaryTypographyProps={{ sx: { fontFamily: "'Inter', sans-serif", fontSize: '13px', fontWeight: activeTab === child.id ? 'bold' : 'normal', color: activeTab === child.id ? cat.color : 'text.primary', whiteSpace: 'nowrap' } }}
                                                 />
                                             </ListItemButton>
                                         </ListItem>
@@ -395,7 +394,7 @@ export default function ProjectWorkspace({ projectId, onBack }) {
 
             {/* 🔥 OPTIMIZED MAIN WORKSPACE CONTENT AREA */}
             <Box sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', overflowX: 'hidden', p: { xs: 2, md: 3 } }}>
-                
+
                 {/* HEADER */}
                 <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', lg: 'center' }, mb: 4, pb: 3, borderBottom: '1px solid', borderColor: 'divider', gap: { xs: 2, lg: 0 } }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -424,22 +423,22 @@ export default function ProjectWorkspace({ projectId, onBack }) {
                     </Box>
                 </Box>
 
-                {/* DYNAMIC TAB CONTENT */}
+                {/* 🔥 DYNAMIC TAB CONTENT WITH DATA PIPELINE (loadData passed to all) */}
                 <Box sx={{ flexGrow: 1 }}>
-                    {activeTab === "details" && (<ProjectDetailsTab project={project} updateProject={updateProject} regions={regions} totalAmount={totalAmount} projectBoqItems={renderedProjectBoq} togglePriceLock={togglePriceLock} crmContacts={crmContacts} orgStaff={orgStaff} />)}
-                    {activeTab === "documents" && (<DocumentsTab projectId={projectId} />)}
-                    {activeTab === "gallery" && (<SiteGalleryTab projectId={projectId} />)}
-                    {activeTab === "boq" && (<BoqBuilderTab projectId={projectId} projectBoqItems={projectBoqItems} masterBoqs={masterBoqs} renderedProjectBoq={renderedProjectBoq} totalAmount={totalAmount} handleAddMasterItem={handleAddMasterItem} handleAddCustomItem={handleAddCustomItem} updateBoqQtyManual={updateBoqQtyManual} deleteProjectBoq={deleteProjectBoq} openEditDialog={(item) => setEditorItem(item)} setFormulaHelpOpen={setFormulaHelpOpen} handleDragStart={handleDragStart} handleDragOver={handleDragOver} handleDrop={handleDrop} draggedId={draggedId} />)}
+                    {activeTab === "details" && (<ProjectDetailsTab project={project} updateProject={updateProject} regions={regions} totalAmount={totalAmount} projectBoqItems={renderedProjectBoq} togglePriceLock={togglePriceLock} crmContacts={crmContacts} orgStaff={orgStaff} loadData={loadData} />)}
+                    {activeTab === "documents" && (<DocumentsTab projectId={projectId} loadData={loadData} />)}
+                    {activeTab === "gallery" && (<SiteGalleryTab projectId={projectId} loadData={loadData} />)}
+                    {activeTab === "boq" && (<BoqBuilderTab projectId={projectId} projectBoqItems={projectBoqItems} masterBoqs={masterBoqs} renderedProjectBoq={renderedProjectBoq} totalAmount={totalAmount} handleAddMasterItem={handleAddMasterItem} handleAddCustomItem={handleAddCustomItem} updateBoqQtyManual={updateBoqQtyManual} deleteProjectBoq={deleteProjectBoq} openEditDialog={(item) => setEditorItem(item)} setFormulaHelpOpen={setFormulaHelpOpen} handleDragStart={handleDragStart} handleDragOver={handleDragOver} handleDrop={handleDrop} draggedId={draggedId} loadData={loadData} />)}
                     {activeTab === "mbook" && (<MeasurementBookTab renderedProjectBoq={renderedProjectBoq} setFormulaHelpOpen={setFormulaHelpOpen} loadData={loadData} />)}
-                    {activeTab === "schedule" && (<GanttScheduleTab project={project} projectBoqItems={projectBoqItems} updateProject={updateProject} />)}
+                    {activeTab === "schedule" && (<GanttScheduleTab project={project} projectBoqItems={projectBoqItems} updateProject={updateProject} loadData={loadData} />)}
                     {activeTab === "subcontractors" && (<SubcontractorBidTab project={project} renderedProjectBoq={renderedProjectBoq} updateProject={updateProject} crmContacts={crmContacts} loadData={loadData} />)}
                     {activeTab === "daily_log" && (<DailyLogTab project={project} projectBoqItems={projectBoqItems} resources={resources} updateProject={updateProject} loadData={loadData} />)}
-                    {activeTab === "resources" && (<ResourceTrackerTab project={project} renderedProjectBoq={renderedProjectBoq} projectResourceMap={projectResourceMap} resources={resources} updateProject={updateProject} />)}
-                    {activeTab === "procurement" && (<ProcurementTab project={project} projectResourceMap={projectResourceMap} resources={resources} updateProject={updateProject} crmContacts={crmContacts} />)}
-                    {activeTab === "billing" && (<ClientBillingTab project={project} renderedProjectBoq={renderedProjectBoq} updateProject={updateProject} />)}
-                    {activeTab === "kanban" && (<KanbanBoardTab project={project} renderedProjectBoq={renderedProjectBoq} orgStaff={orgStaff} updateProject={updateProject} />)}
-                    {activeTab === "inventory" && (<InventoryTab project={project} resources={resources} updateProject={updateProject} />)}
-                    {activeTab === "chat" && (<ChatModule projectId={projectId} orgStaff={orgStaff} />)}
+                    {activeTab === "resources" && (<ResourceTrackerTab project={project} renderedProjectBoq={renderedProjectBoq} projectResourceMap={projectResourceMap} resources={resources} updateProject={updateProject} loadData={loadData} />)}
+                    {activeTab === "procurement" && (<ProcurementTab project={project} projectResourceMap={projectResourceMap} resources={resources} updateProject={updateProject} crmContacts={crmContacts} loadData={loadData} />)}
+                    {activeTab === "billing" && (<ClientBillingTab project={project} renderedProjectBoq={renderedProjectBoq} updateProject={updateProject} loadData={loadData} />)}
+                    {activeTab === "kanban" && (<KanbanBoardTab project={project} renderedProjectBoq={renderedProjectBoq} orgStaff={orgStaff} updateProject={updateProject} loadData={loadData} />)}
+                    {activeTab === "inventory" && (<InventoryTab project={project} resources={resources} updateProject={updateProject} loadData={loadData} />)}
+                    {activeTab === "chat" && (<ChatModule projectId={projectId} orgStaff={orgStaff} loadData={loadData} />)}
                 </Box>
 
             </Box>

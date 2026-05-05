@@ -67,10 +67,10 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
 
             const newTask = {
                 id: crypto.randomUUID(),
-                name: `ORDER: ${reqItem} (${reqQty})`, 
+                name: `ORDER: ${reqItem} (${reqQty})`,
                 phase: "Procurement",
                 status: "Not Started",
-                columnId: "todo", 
+                columnId: "todo",
                 priority: reqUrgency === "High" ? "High" : "Medium",
                 assignedTo: "Procurement Team",
                 description: `Site requested ${reqQty} of ${reqItem} on ${newReq.date}.`
@@ -107,8 +107,8 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
         if (!customCode || !customDesc) return alert("Code and Description required.");
         const newId = crypto.randomUUID();
         const newRes = { id: newId, code: customCode, description: customDesc, unit: customUnit, rates: {} };
-        await window.api.db.createResource(newRes); 
-        if (loadData) await loadData(); 
+        await window.api.db.createResource(newRes);
+        if (loadData) await loadData();
         setSelectedRes(newRes);
         setIsCustomOpen(false);
         setCustomCode(""); setCustomDesc("");
@@ -119,7 +119,7 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
         const newSchedule = { id: crypto.randomUUID(), date: scheduleDate, shiftStart, shiftEnd, weather, notes: shiftNotes };
         const schedules = [...validSchedules, newSchedule];
         await updateProject("dailySchedules", schedules);
-        setShiftNotes(""); 
+        setShiftNotes("");
     };
 
     const deleteSchedule = async (id) => {
@@ -142,14 +142,18 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
             return t;
         });
         await updateProject("ganttTasks", updatedTasks);
+
+        if (loadData) loadData();
     };
 
     const handleTaskDateChange = async (taskId, field, value) => {
         const updatedTasks = validTasks.map(t => t.id === taskId ? { ...t, [field]: value } : t);
         await updateProject("ganttTasks", updatedTasks);
+
+        if (loadData) loadData();
     };
 
-    const exportTemplate = () => { 
+    const exportTemplate = () => {
         const header = ["Date", "Phase", "Resource Code", "Resource Description", "Quantity Consumed", "Unit"];
         const wsData = [header];
         if (validLogs.length === 0) {
@@ -163,7 +167,7 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
         const ws = XLSX.utils.aoa_to_sheet(wsData);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Daily_Material_Logs");
-        XLSX.writeFile(wb, `${project.name || 'Project'}_MaterialLogs.xlsx`); 
+        XLSX.writeFile(wb, `${project.name || 'Project'}_MaterialLogs.xlsx`);
     };
 
     const handleImport = async (e) => {
@@ -203,7 +207,7 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
             } catch (err) { alert("Import failed."); }
         };
         reader.readAsArrayBuffer(file);
-        e.target.value = null; 
+        e.target.value = null;
     };
 
     const sortedLogs = [...validLogs].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -229,24 +233,24 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
                 </Typography>
                 <Box display="flex" flexDirection={{ xs: 'column', md: 'row' }} gap={2} alignItems={{ xs: 'stretch', md: 'center' }}>
                     <Box sx={{ flex: 2 }}>
-                        <input 
-                            placeholder="Item Description" 
-                            value={reqItem} 
-                            onChange={e => setReqItem(e.target.value)} 
-                            style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.3)', color: '#fff', width: '100%', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', boxSizing: 'border-box' }} 
+                        <input
+                            placeholder="Item Description"
+                            value={reqItem}
+                            onChange={e => setReqItem(e.target.value)}
+                            style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.3)', color: '#fff', width: '100%', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', boxSizing: 'border-box' }}
                         />
                     </Box>
                     <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }} sx={{ flex: 1.5 }}>
-                        <input 
-                            type="number" 
-                            placeholder="Qty" 
-                            value={reqQty} 
-                            onChange={e => setReqQty(e.target.value)} 
-                            style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.3)', color: '#fff', width: '100%', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', boxSizing: 'border-box' }} 
+                        <input
+                            type="number"
+                            placeholder="Qty"
+                            value={reqQty}
+                            onChange={e => setReqQty(e.target.value)}
+                            style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.3)', color: '#fff', width: '100%', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', boxSizing: 'border-box' }}
                         />
-                        <select 
-                            value={reqUrgency} 
-                            onChange={e => setReqUrgency(e.target.value)} 
+                        <select
+                            value={reqUrgency}
+                            onChange={e => setReqUrgency(e.target.value)}
                             style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.3)', color: '#fff', width: '100%', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', boxSizing: 'border-box' }}
                         >
                             <option value="Normal">Normal</option>
@@ -356,7 +360,7 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
             <Paper sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
                 <Typography variant="subtitle2" fontWeight="bold" mb={1} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '14px' }}>TASK_EXECUTION_&_TRACKING</Typography>
                 <Typography variant="body2" color="text.secondary" mb={3} sx={{ fontSize: '12px' }}>Update status and dates. Syncs with Gantt Chart.</Typography>
-                
+
                 <TableContainer sx={{ overflowX: 'auto', borderRadius: 2, border: '1px solid rgba(255,255,255,0.1)' }}>
                     <Table size="small" sx={{ minWidth: 800 }}>
                         <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.3)' }}>
@@ -397,12 +401,12 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
             </Paper>
 
             {/* CUSTOM RESOURCE DIALOG WITH ARIA FIX */}
-            <Dialog 
-                open={isCustomOpen} 
-                onClose={() => setIsCustomOpen(false)} 
-                maxWidth="sm" 
+            <Dialog
+                open={isCustomOpen}
+                onClose={() => setIsCustomOpen(false)}
+                maxWidth="sm"
                 fullWidth
-                disableRestoreFocus 
+                disableRestoreFocus
             >
                 <DialogTitle sx={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 'bold' }}>ADD_CUSTOM_RESOURCE</DialogTitle>
                 <DialogContent dividers sx={{ bgcolor: 'rgba(13, 31, 60, 0.5)', display: 'flex', flexDirection: 'column', gap: 3 }}>

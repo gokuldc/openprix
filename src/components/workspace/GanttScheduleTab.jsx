@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
     Box, Paper, Typography, Table, TableBody, TableCell, TableContainer,
-    TableHead, TableRow, TextField, Button, Autocomplete, IconButton, MenuItem, Chip, Grid
+    TableHead, TableRow, TextField, Button, Autocomplete, IconButton, MenuItem, Grid
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -16,21 +16,98 @@ import { saveAs } from 'file-saver';
 
 const STICKY_BG = '#0b172d';
 
-export default function GanttScheduleTab({ project, projectBoqItems, updateProject }) {
+// 🔥 ADVANCED CPM FORECASTING ENGINE
+const calculateLiveForecast = (tasks) => {
+    let live = tasks.map(t => {
+        const start = new Date(t.startDate);
+        const end = new Date(t.endDate);
+        const duration = Math.max(1, Math.ceil((end - start) / 86400000) + 1);
+        return {
+            ...t,
+            plannedDuration: duration,
+            forecastStart: t.actualStart || t.startDate,
+            forecastEnd: t.actualEnd || null
+        };
+    });
+
+    // Initialize missing ends
+    live = live.map(t => {
+        if (!t.forecastEnd) {
+            const fs = new Date(t.forecastStart);
+            if (t.type !== 'Milestone') fs.setDate(fs.getDate() + t.plannedDuration - 1);
+            t.forecastEnd = fs.toISOString().split('T')[0];
+        }
+        return t;
+    });
+
+    let changed = true;
+    let iters = 0;
+    while (changed && iters < 20) {
+        changed = false;
+        iters++;
+        live = live.map(task => {
+            let newStart = new Date(task.forecastStart);
+
+            // Domino Effect: Push start dates based on predecessor's FORECASTED end date
+            if (!task.actualStart && task.dependency && task.dependency.taskId) {
+                const pred = live.find(t => t.id === task.dependency.taskId);
+                if (pred && pred.forecastEnd) {
+                    const predStart = new Date(pred.forecastStart);
+                    const predEnd = new Date(pred.forecastEnd);
+                    const lag = Number(task.dependency.lag) || 0;
+                    const isMilestone = task.type === 'Milestone';
+
+                    if (task.dependency.type === 'FS') {
+                        newStart = new Date(predEnd);
+                        newStart.setDate(newStart.getDate() + (isMilestone ? 0 : 1) + lag);
+                    } else if (task.dependency.type === 'SS') {
+                        newStart = new Date(predStart);
+                        newStart.setDate(newStart.getDate() + lag);
+                    } else if (task.dependency.type === 'FF') {
+                        const tempEnd = new Date(predEnd);
+                        tempEnd.setDate(tempEnd.getDate() + lag);
+                        newStart = new Date(tempEnd);
+                        if (!isMilestone) newStart.setDate(newStart.getDate() - task.plannedDuration + 1);
+                    } else if (task.dependency.type === 'SF') {
+                        const tempEnd = new Date(predStart);
+                        tempEnd.setDate(tempEnd.getDate() + lag);
+                        newStart = new Date(tempEnd);
+                        if (!isMilestone) newStart.setDate(newStart.getDate() - task.plannedDuration + 1);
+                    }
+                }
+            }
+
+            // Calculate new end date based on new pushed start date
+            let newEnd = task.actualEnd ? new Date(task.actualEnd) : new Date(newStart);
+            if (!task.actualEnd && task.type !== 'Milestone') {
+                newEnd.setDate(newStart.getDate() + task.plannedDuration - 1);
+            }
+
+            const startStr = newStart.toISOString().split('T')[0];
+            const endStr = newEnd.toISOString().split('T')[0];
+
+            if (task.forecastStart !== startStr || task.forecastEnd !== endStr) {
+                changed = true;
+                return { ...task, forecastStart: startStr, forecastEnd: endStr };
+            }
+            return task;
+        });
+    }
+    return live;
+};
+
+export default function GanttScheduleTab({ project, projectBoqItems, updateProject, loadData }) {
     const tasks = Array.isArray(project?.ganttTasks) ? project.ganttTasks : [];
 
-    // --- FORM STATE ---
     const [taskName, setTaskName] = useState("");
     const [taskType, setTaskType] = useState("Task");
     const [activePhase, setActivePhase] = useState("General");
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [endDate, setEndDate] = useState(new Date(Date.now() + 86400000).toISOString().split('T')[0]);
-
     const [predecessorId, setPredecessorId] = useState("");
     const [dependencyType, setDependencyType] = useState("FS");
     const [dependencyLag, setDependencyLag] = useState(0);
 
-    // --- UI STATE ---
     const [zoomLevel, setZoomLevel] = useState(1);
     const [draggedId, setDraggedId] = useState(null);
 
@@ -48,7 +125,7 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
         return Array.from(phases);
     }, [projectBoqItems, tasks]);
 
-    // --- CPM AUTO-SCHEDULING ENGINE ---
+    // 🔥 FIX: cascadeDates now STRICTLY sets the Baseline plan. It ignores actuals.
     const cascadeDates = (taskList) => {
         let changed = true;
         let iterations = 0;
@@ -60,18 +137,17 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
 
             currentTasks = currentTasks.map(task => {
                 if (!task.dependency || !task.dependency.taskId) return task;
-
                 const pred = currentTasks.find(t => t.id === task.dependency.taskId);
                 if (!pred) return task;
 
-                const newStart = new Date(task.startDate || task.actualStart);
-                const newEnd = new Date(task.endDate || task.actualEnd);
+                const newStart = new Date(task.startDate);
+                const newEnd = new Date(task.endDate);
                 const duration = Math.max(0, (newEnd - newStart) / 86400000);
                 const isMilestone = task.type === 'Milestone';
                 const lag = Number(task.dependency.lag) || 0;
 
-                const predStart = new Date(pred.startDate || pred.actualStart);
-                const predEnd = new Date(pred.endDate || pred.actualEnd);
+                const predStart = new Date(pred.startDate);
+                const predEnd = new Date(pred.endDate);
 
                 let expectedStart = new Date(newStart);
                 let expectedEnd = new Date(newEnd);
@@ -101,9 +177,9 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                 const expectedStartStr = expectedStart.toISOString().split('T')[0];
                 const expectedEndStr = expectedEnd.toISOString().split('T')[0];
 
-                if ((task.startDate || task.actualStart) !== expectedStartStr || (task.endDate || task.actualEnd) !== expectedEndStr) {
+                if (task.startDate !== expectedStartStr || task.endDate !== expectedEndStr) {
                     changed = true;
-                    return { ...task, startDate: expectedStartStr, endDate: expectedEndStr, actualStart: expectedStartStr, actualEnd: expectedEndStr };
+                    return { ...task, startDate: expectedStartStr, endDate: expectedEndStr };
                 }
                 return task;
             });
@@ -114,9 +190,9 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
     const saveTasks = async (newTasks) => {
         const scheduledTasks = cascadeDates(newTasks);
         await updateProject("ganttTasks", scheduledTasks);
+        if (loadData) loadData();
     };
 
-    // --- CRUD OPERATIONS ---
     const addTask = async () => {
         if (!taskName || !startDate) return alert("Task Name and Start date are required.");
         const finalEndDate = taskType === "Milestone" ? startDate : endDate;
@@ -125,11 +201,10 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
         const newTask = {
             id: crypto.randomUUID(), name: taskName, type: taskType,
             phase: activePhase || "General", startDate, endDate: finalEndDate,
-            actualStart: startDate, actualEnd: finalEndDate, status: "Not Started", priority: "Medium",
+            actualStart: null, actualEnd: null, status: "Not Started", priority: "Medium",
             dependency: predecessorId ? { taskId: predecessorId, type: dependencyType, lag: Number(dependencyLag) } : null,
             createdAt: new Date().toISOString()
         };
-
         await saveTasks([...tasks, newTask]);
         setTaskName(""); setPredecessorId(""); setDependencyLag(0);
     };
@@ -146,15 +221,13 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
         const updatedTasks = tasks.map(t => {
             if (t.id === id) {
                 const updated = { ...t, [field]: value };
-                if (field === "startDate") updated.actualStart = value;
-                if (field === "endDate") updated.actualEnd = value;
-                
+                if (field === "startDate" && !updated.actualStart) updated.actualStart = value;
+                if (field === "endDate" && !updated.actualEnd) updated.actualEnd = value;
                 if (updated.type === "Milestone" && field !== "name") {
                     updated.endDate = updated.startDate;
-                    updated.actualEnd = updated.actualStart;
+                    if (!updated.actualEnd) updated.actualEnd = updated.actualStart;
                 } else if (updated.startDate && updated.endDate && new Date(updated.endDate) < new Date(updated.startDate)) {
                     updated.endDate = updated.startDate;
-                    updated.actualEnd = updated.actualStart;
                 }
                 return updated;
             }
@@ -168,7 +241,6 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
         await saveTasks(updatedTasks);
     };
 
-    // --- DRAG AND DROP ---
     const handleDragStart = (e, id) => { setDraggedId(id); e.dataTransfer.effectAllowed = "move"; };
     const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; };
     const handleDrop = async (e, targetId) => {
@@ -185,67 +257,84 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
         setDraggedId(null);
     };
 
-    // --- TIMELINE VISUALIZATION MATH ---
-    const { minDate, maxDate, totalDays } = useMemo(() => {
-        if (tasks.length === 0) return { minDate: null, maxDate: null, totalDays: 0 };
-        let min = new Date(tasks[0].startDate || tasks[0].actualStart);
-        let max = new Date(tasks[0].endDate || tasks[0].actualEnd);
+    // 🔥 GENERATE LIVE FORECAST
+    const liveTasks = useMemo(() => calculateLiveForecast(tasks), [tasks]);
 
-        tasks.forEach(task => {
-            const sDate = new Date(task.startDate || task.actualStart);
-            const eDate = new Date(task.endDate || task.actualEnd);
-            if (sDate < min) min = sDate;
-            if (eDate > max) max = eDate;
+    // 🔥 TIMELINE VISUALIZATION MATH (Calculates bounds based on BOTH baseline and forecast)
+    const { minDate, maxDate, totalDays } = useMemo(() => {
+        if (liveTasks.length === 0) return { minDate: null, maxDate: null, totalDays: 0 };
+        let min = new Date(liveTasks[0].startDate);
+        let max = new Date(liveTasks[0].endDate);
+
+        liveTasks.forEach(task => {
+            const bStart = new Date(task.startDate);
+            const bEnd = new Date(task.endDate);
+            const fStart = new Date(task.forecastStart);
+            const fEnd = new Date(task.forecastEnd);
+            if (bStart < min) min = bStart;
+            if (fStart < min) min = fStart;
+            if (bEnd > max) max = bEnd;
+            if (fEnd > max) max = fEnd;
         });
 
         const span = Math.ceil((max - min) / (1000 * 60 * 60 * 24)) + 1;
         return { minDate: min, maxDate: max, totalDays: span };
-    }, [tasks]);
+    }, [liveTasks]);
 
     const baseDayWidth = 30;
     const ganttColumnWidth = totalDays > 0 ? Math.max(400, totalDays * baseDayWidth * zoomLevel) : 400;
     const pixelsPerDay = totalDays > 0 ? ganttColumnWidth / totalDays : 0;
 
     const getBarColor = (status) => {
-        switch(status) {
-            case 'Completed': return 'success.main';
-            case 'In Progress': return 'info.main';
-            case 'Pending Procurement': return 'warning.main';
-            case 'Quality Check': return 'secondary.main';
-            default: return 'rgba(158, 158, 158, 0.5)';
+        switch (status) {
+            case 'Completed': return '#10b981';
+            case 'In Progress': return '#3b82f6';
+            case 'Pending Procurement': return '#f59e0b';
+            case 'Quality Check': return '#9c27b0';
+            default: return '#6b7280'; // Gray for Not Started Forecast
         }
     };
 
-    const getBarStyles = (task) => {
-        if (!task.startDate && !task.actualStart) return { display: 'none' };
-        if (totalDays === 0) return { display: 'none' };
-
-        const start = new Date(task.startDate || task.actualStart);
-        const end = new Date(task.endDate || task.actualEnd);
+    const getBaselineStyles = (task) => {
+        if (!task.startDate || totalDays === 0) return null;
+        const start = new Date(task.startDate);
+        const end = new Date(task.endDate);
         const startOffsetDays = Math.floor((start - minDate) / (1000 * 60 * 60 * 24));
         const durationDays = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1);
 
+        if (task.type === 'Milestone') {
+            let offsetModifier = task.dependency && (task.dependency.type === 'FS' || task.dependency.type === 'FF') ? 1 : 0;
+            return { left: `${((startOffsetDays + offsetModifier) / totalDays) * 100}%`, width: `0%` };
+        }
+        return { left: `${Math.max(0, (startOffsetDays / totalDays) * 100)}%`, width: `${Math.min(100, (durationDays / totalDays) * 100)}%` };
+    };
+
+    const getForecastStyles = (task) => {
+        if (totalDays === 0) return null;
+        const start = new Date(task.forecastStart);
+        const end = new Date(task.forecastEnd);
+
+        const startOffsetDays = Math.floor((start - minDate) / (1000 * 60 * 60 * 24));
+        const durationDays = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1);
         const barColor = getBarColor(task.status);
+        const isFutureForecast = task.status === 'Not Started';
 
         if (task.type === 'Milestone') {
-            let offsetModifier = 0;
-            if (task.dependency && (task.dependency.type === 'FS' || task.dependency.type === 'FF')) offsetModifier = 1;
-            const diamondColor = task.status === "Completed" ? 'success.main' : 'warning.main';
-            return { left: `${((startOffsetDays + offsetModifier) / totalDays) * 100}%`, width: `0%`, display: 'block', bgcolor: diamondColor };
-        } else {
-            return { left: `${Math.max(0, (startOffsetDays / totalDays) * 100)}%`, width: `${Math.min(100, (durationDays / totalDays) * 100)}%`, display: 'block', bgcolor: barColor };
+            let offsetModifier = task.dependency && (task.dependency.type === 'FS' || task.dependency.type === 'FF') ? 1 : 0;
+            return { left: `${((startOffsetDays + offsetModifier) / totalDays) * 100}%`, width: `0%`, bgcolor: task.status === "Completed" ? '#10b981' : '#f59e0b', opacity: isFutureForecast ? 0.5 : 1 };
         }
+        return { left: `${Math.max(0, (startOffsetDays / totalDays) * 100)}%`, width: `${Math.min(100, (durationDays / totalDays) * 100)}%`, bgcolor: barColor, opacity: isFutureForecast ? 0.6 : 1 };
     };
 
     const groupedTasks = useMemo(() => {
         const groups = {};
-        tasks.forEach(task => {
+        liveTasks.forEach(task => {
             const phase = task.phase || "General";
             if (!groups[phase]) groups[phase] = [];
             groups[phase].push(task);
         });
         return groups;
-    }, [tasks]);
+    }, [liveTasks]);
 
     const renderTimelineHeader = () => {
         if (!minDate || totalDays <= 0) return null;
@@ -272,11 +361,7 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                     else if (scaleMode === 'months' && isFirst) label = d.toLocaleDateString('en-US', { month: 'short' });
 
                     return (
-                        <Box key={idx} sx={{
-                            flex: 1, borderRight: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center',
-                            justifyContent: 'flex-start', pl: 0.5, fontSize: '10px', color: 'text.secondary',
-                            overflow: 'visible', whiteSpace: 'nowrap'
-                        }}>
+                        <Box key={idx} sx={{ flex: 1, borderRight: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', pl: 0.5, fontSize: '10px', color: 'text.secondary', overflow: 'visible', whiteSpace: 'nowrap' }}>
                             {label}
                         </Box>
                     );
@@ -292,24 +377,12 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
 
         const columns = [
             { header: 'Task / Milestone', key: 'name', width: 35 },
-            { header: 'Start Date', key: 'start', width: 15 },
-            { header: 'End Date', key: 'end', width: 15 },
-            { header: 'Dependency', key: 'dep', width: 15 },
+            { header: 'Baseline Start', key: 'bstart', width: 15 },
+            { header: 'Baseline End', key: 'bend', width: 15 },
+            { header: 'Live Forecast End', key: 'fend', width: 15 },
             { header: 'Phase', key: 'phase', width: 20 },
         ];
-
-        const daysArray = [];
-        let curDate = new Date(minDate);
-        for (let i = 0; i < totalDays; i++) {
-            daysArray.push(curDate.getTime());
-            columns.push({ header: `${curDate.getMonth() + 1}/${curDate.getDate()}`, key: `day_${i}`, width: 4 });
-            curDate.setDate(curDate.getDate() + 1);
-        }
         worksheet.columns = columns;
-
-        worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B172D' } };
-        worksheet.getRow(1).alignment = { horizontal: 'center' };
 
         Object.entries(groupedTasks).forEach(([phaseName, phaseTasks]) => {
             const phaseRow = worksheet.addRow({ name: `PHASE: ${phaseName.toUpperCase()}` });
@@ -317,54 +390,28 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
             phaseRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F8FF' } };
 
             phaseTasks.forEach(task => {
-                let depLabel = "-";
-                if (task.dependency) {
-                    const pred = tasks.find(t => t.id === task.dependency.taskId);
-                    if (pred) depLabel = `${pred.name} (${task.dependency.type}) ${task.dependency.lag ? `${task.dependency.lag > 0 ? '+' : ''}${task.dependency.lag}d` : ''}`;
-                }
-
-                const row = worksheet.addRow({
+                worksheet.addRow({
                     name: task.name + (task.type === "Milestone" ? " ◆" : ""),
-                    start: task.startDate || task.actualStart,
-                    end: task.endDate || task.actualEnd,
-                    dep: depLabel,
+                    bstart: task.startDate,
+                    bend: task.endDate,
+                    fend: task.forecastEnd,
                     phase: task.phase
-                });
-
-                const tStart = new Date(task.startDate || task.actualStart).setHours(0, 0, 0, 0);
-                const tEnd = new Date(task.endDate || task.actualEnd).setHours(0, 0, 0, 0);
-
-                daysArray.forEach((dayTime, index) => {
-                    if (dayTime >= tStart && dayTime <= tEnd) {
-                        const cell = row.getCell(`day_${index}`);
-                        if (task.type === "Milestone") {
-                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF59E0B' } };
-                        } else {
-                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } };
-                        }
-                    }
                 });
             });
         });
-
         const buffer = await workbook.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        saveAs(blob, `${project.name}_Gantt_Schedule.xlsx`);
+        saveAs(blob, `${project.name}_Live_Schedule.xlsx`);
     };
 
     return (
         <Box display="flex" flexDirection="column" gap={4}>
-
             {/* --- 1. RESPONSIVE TASK CREATION FORM --- */}
             <Paper sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
                 <Typography variant="subtitle2" fontWeight="bold" mb={2} sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.5px', fontSize: '14px' }}>
                     ADD_SCHEDULE_ITEM
                 </Typography>
-                
-                {/* 🔥 FIX: Flattened into a full Grid Container to perfectly align textboxes on all screen sizes */}
                 <Grid container spacing={2} alignItems="flex-start">
-                    
-                    {/* Row 1 */}
                     <Grid item xs={12} md={2}>
                         <TextField select fullWidth size="small" label="TYPE" value={taskType} onChange={e => setTaskType(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}>
                             <MenuItem value="Task" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>Task</MenuItem>
@@ -377,18 +424,16 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                     <Grid item xs={12} md={4}>
                         <Autocomplete freeSolo fullWidth options={availablePhases} value={activePhase} onChange={(e, newVal) => setActivePhase(newVal || "General")} onInputChange={(e, newVal) => setActivePhase(newVal || "General")} renderInput={(params) => <TextField {...params} size="small" label="PHASE" InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ ...params.InputProps, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />} />
                     </Grid>
-
-                    {/* Row 2 */}
                     <Grid item xs={6} md={2}>
-                        <TextField type="date" fullWidth size="small" label="START" value={startDate} onChange={e => setStartDate(e.target.value)} InputLabelProps={{ shrink: true, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                        <TextField type="date" fullWidth size="small" label="BASELINE START" value={startDate} onChange={e => setStartDate(e.target.value)} InputLabelProps={{ shrink: true, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
                     </Grid>
                     <Grid item xs={6} md={2}>
-                        <TextField type="date" fullWidth size="small" label="END" value={taskType === "Milestone" ? startDate : endDate} onChange={e => setEndDate(e.target.value)} disabled={taskType === "Milestone"} inputProps={{ min: startDate }} InputLabelProps={{ shrink: true, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                        <TextField type="date" fullWidth size="small" label="BASELINE END" value={taskType === "Milestone" ? startDate : endDate} onChange={e => setEndDate(e.target.value)} disabled={taskType === "Milestone"} inputProps={{ min: startDate }} InputLabelProps={{ shrink: true, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
                     </Grid>
                     <Grid item xs={12} md={3}>
                         <TextField select fullWidth size="small" label="PREDECESSOR" value={predecessorId} onChange={e => setPredecessorId(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}>
                             <MenuItem value="">-- NONE --</MenuItem>
-                            {tasks.map(t => <MenuItem key={t.id} value={t.id} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', whiteSpace: 'normal' }}>{t.name}</MenuItem>)}
+                            {liveTasks.map(t => <MenuItem key={t.id} value={t.id} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', whiteSpace: 'normal' }}>{t.name}</MenuItem>)}
                         </TextField>
                     </Grid>
                     <Grid item xs={6} md={2}>
@@ -397,13 +442,12 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                         </TextField>
                     </Grid>
                     <Grid item xs={6} md={1}>
-                        <TextField type="number" fullWidth size="small" label="LAG (Days)" value={dependencyLag} onChange={e => setDependencyLag(e.target.value)} disabled={!predecessorId} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                        <TextField type="number" fullWidth size="small" label="LAG" value={dependencyLag} onChange={e => setDependencyLag(e.target.value)} disabled={!predecessorId} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
                     </Grid>
                     <Grid item xs={12} md={2}>
                         <Button fullWidth variant="contained" color="primary" onClick={addTask} startIcon={<AddIcon />} sx={{ height: 40, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: '12px' }}>ADD</Button>
                     </Grid>
                 </Grid>
-
             </Paper>
 
             {/* --- 2. THE WBS DATA TABLE --- */}
@@ -413,18 +457,17 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                         <AccountTreeIcon color="primary" fontSize="small" /> WORK BREAKDOWN STRUCTURE (WBS)
                     </Typography>
                 </Box>
-
                 <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, overflowX: 'auto' }}>
                     <Table size="small" sx={{ minWidth: 900 }}>
                         <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.3)' }}>
                             <TableRow>
                                 <TableCell sx={{ width: 40 }}></TableCell>
                                 <TableCell sx={{ width: '30%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap' }}>TASK NAME</TableCell>
-                                <TableCell sx={{ width: '15%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap' }}>START</TableCell>
-                                <TableCell sx={{ width: '15%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap' }}>END</TableCell>
+                                <TableCell sx={{ width: '15%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap', color: 'text.secondary' }}>BASELINE START</TableCell>
+                                <TableCell sx={{ width: '15%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap', color: 'text.secondary' }}>BASELINE END</TableCell>
                                 <TableCell sx={{ width: '20%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap' }}>DEPENDENCY</TableCell>
                                 <TableCell sx={{ width: '15%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap' }}>STATUS</TableCell>
-                                <TableCell align="center" sx={{ width: '5%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}></TableCell>
+                                <TableCell align="center" sx={{ width: '5%' }}></TableCell>
                             </TableRow>
                         </TableHead>
                         <TableBody>
@@ -452,22 +495,21 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                                                         </Box>
                                                     </TableCell>
                                                     <TableCell>
-                                                        <input type="date" value={task.startDate || task.actualStart} onChange={e => updateTaskInline(task.id, "startDate", e.target.value)} disabled={isStartLocked} style={{ background: 'transparent', color: isStartLocked ? 'gray' : 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', width: '100%', minWidth: '110px', outline: 'none' }} />
+                                                        <input type="date" value={task.startDate} onChange={e => updateTaskInline(task.id, "startDate", e.target.value)} disabled={isStartLocked} style={{ background: 'transparent', color: isStartLocked ? 'gray' : 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', width: '100%', minWidth: '110px', outline: 'none' }} />
                                                     </TableCell>
                                                     <TableCell>
-                                                        <input type="date" value={task.endDate || task.actualEnd} onChange={e => updateTaskInline(task.id, "endDate", e.target.value)} disabled={isEndLocked} style={{ background: 'transparent', color: isEndLocked ? 'gray' : 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', width: '100%', minWidth: '110px', outline: 'none' }} />
+                                                        <input type="date" value={task.endDate} onChange={e => updateTaskInline(task.id, "endDate", e.target.value)} disabled={isEndLocked} style={{ background: 'transparent', color: isEndLocked ? 'gray' : 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', width: '100%', minWidth: '110px', outline: 'none' }} />
                                                     </TableCell>
                                                     <TableCell sx={{ whiteSpace: 'nowrap' }}>
                                                         <select value={task.dependency?.taskId || ""} onChange={e => updateDependency(task.id, e.target.value, task.dependency?.type || "FS", task.dependency?.lag || 0)} style={{ ...nativeSelectStyle, width: '80px', marginRight: '6px' }}>
                                                             <option value="" style={{ color: 'black' }}>- None -</option>
-                                                            {tasks.filter(t => t.id !== task.id).map(t => <option key={t.id} value={t.id} style={{ color: 'black' }}>{t.name}</option>)}
+                                                            {liveTasks.filter(t => t.id !== task.id).map(t => <option key={t.id} value={t.id} style={{ color: 'black' }}>{t.name}</option>)}
                                                         </select>
                                                         <select value={task.dependency?.type || "FS"} onChange={e => updateDependency(task.id, task.dependency?.taskId, e.target.value, task.dependency?.lag || 0)} disabled={!task.dependency?.taskId} style={{ ...nativeSelectStyle, width: '40px', marginRight: '6px', opacity: !task.dependency?.taskId ? 0.3 : 1 }}>
                                                             <option value="FS" style={{ color: 'black' }}>FS</option><option value="SS" style={{ color: 'black' }}>SS</option>
                                                             <option value="FF" style={{ color: 'black' }}>FF</option><option value="SF" style={{ color: 'black' }}>SF</option>
                                                         </select>
                                                         <input type="number" value={task.dependency?.lag || 0} onChange={e => updateDependency(task.id, task.dependency?.taskId, task.dependency?.type || "FS", e.target.value)} disabled={!task.dependency?.taskId} style={{ ...nativeSelectStyle, width: '40px', opacity: !task.dependency?.taskId ? 0.3 : 1 }} />
-                                                        <Typography variant="caption" color="text.secondary" ml={0.5}>d</Typography>
                                                     </TableCell>
                                                     <TableCell>
                                                         <select value={task.status || "Not Started"} onChange={e => updateTaskInline(task.id, "status", e.target.value)} style={{ ...nativeSelectStyle, width: '100%', minWidth: '100px' }}>
@@ -492,12 +534,12 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                 </TableContainer>
             </Paper>
 
-            {/* --- 3. THE RESPONSIVE GANTT TIMELINE MATRIX --- */}
+            {/* --- 3. THE DUAL-BASELINE GANTT MATRIX --- */}
             <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
                 <Box sx={{ p: 2, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'center' }, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'rgba(0,0,0,0.2)', gap: 2 }}>
                     <Box display="flex" flexWrap="wrap" alignItems="center" gap={2}>
                         <Typography variant="subtitle1" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <TimelineIcon color="primary" fontSize="small" /> VISUAL GANTT MATRIX
+                            <TimelineIcon color="primary" fontSize="small" /> LIVE FORECAST MATRIX
                         </Typography>
                         <Box display="flex" alignItems="center" gap={0.5} bgcolor="rgba(0,0,0,0.3)" borderRadius={2} px={1}>
                             <IconButton size="small" onClick={() => setZoomLevel(z => Math.max(0.2, z - 0.2))} color="primary"><ZoomOutIcon fontSize="small" /></IconButton>
@@ -509,7 +551,7 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                         </Button>
                     </Box>
                     <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
-                        DURATION: <Typography component="span" fontWeight="bold" color="success.main">{totalDays > 0 ? `${totalDays} DAYS` : "TBD"}</Typography>
+                        EXPECTED DURATION: <Typography component="span" fontWeight="bold" color={totalDays > 0 ? "warning.main" : "text.secondary"}>{totalDays > 0 ? `${totalDays} DAYS` : "TBD"}</Typography>
                     </Typography>
                 </Box>
 
@@ -539,7 +581,8 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                                         </TableRow>
 
                                         {phaseTasks.map(task => {
-                                            const barStyles = getBarStyles(task);
+                                            const baseStyles = getBaselineStyles(task);
+                                            const actStyles = getForecastStyles(task);
                                             const isMilestone = task.type === "Milestone";
 
                                             return (
@@ -551,12 +594,26 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                                                         </Box>
                                                     </TableCell>
                                                     <TableCell sx={{ position: 'relative', borderLeft: '1px dashed rgba(255,255,255,0.1)', p: 1, backgroundImage: totalDays > 0 ? `repeating-linear-gradient(to right, transparent, transparent calc(100% / ${totalDays} - 1px), rgba(255,255,255,0.05) calc(100% / ${totalDays}))` : 'none' }}>
-                                                        <Box sx={{ width: '100%', height: '24px', position: 'relative', borderRadius: 1 }}>
-                                                            {isMilestone ? (
-                                                                <Box sx={{ position: 'absolute', left: barStyles.left, width: '14px', height: '14px', bgcolor: barStyles.bgcolor, transform: 'translate(-50%, -50%) rotate(45deg)', top: '50%', boxShadow: '0 0 8px rgba(245, 158, 11, 0.6)', zIndex: 2 }} />
-                                                            ) : (
-                                                                <Box sx={{ ...barStyles, position: 'absolute', height: '100%', borderRadius: 1, opacity: 0.9, boxShadow: '0 0 8px rgba(0,0,0,0.3)', transition: 'all 0.3s ease', '&:hover': { opacity: 1 } }} />
+                                                        <Box sx={{ width: '100%', height: '28px', position: 'relative', borderRadius: 1 }}>
+
+                                                            {/* 🔥 LAYER 1: BASELINE PLANNED SCHEDULE (Hollow Box) */}
+                                                            {baseStyles && (
+                                                                isMilestone ? (
+                                                                    <Box sx={{ position: 'absolute', left: baseStyles.left, width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', transform: 'translate(-50%, -50%) rotate(45deg)', top: '50%', zIndex: 1 }} />
+                                                                ) : (
+                                                                    <Box sx={{ ...baseStyles, position: 'absolute', height: '50%', top: '25%', borderRadius: 1, border: '1px dashed rgba(255,255,255,0.4)', bgcolor: 'rgba(255,255,255,0.05)', zIndex: 1 }} />
+                                                                )
                                                             )}
+
+                                                            {/* 🔥 LAYER 2: ACTUAL / FORECAST PROGRESS (Solid / Hatched) */}
+                                                            {actStyles && (
+                                                                isMilestone ? (
+                                                                    <Box sx={{ position: 'absolute', left: actStyles.left, width: '14px', height: '14px', bgcolor: actStyles.bgcolor, backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.2) 2px, rgba(0,0,0,0.2) 4px)', transform: 'translate(-50%, -50%) rotate(45deg)', top: '50%', boxShadow: '0 0 8px rgba(0,0,0,0.5)', opacity: actStyles.opacity, zIndex: 2 }} />
+                                                                ) : (
+                                                                    <Box sx={{ ...actStyles, position: 'absolute', height: '80%', top: '10%', borderRadius: 1, backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.2) 4px, rgba(0,0,0,0.2) 6px)', boxShadow: '0 0 8px rgba(0,0,0,0.4)', transition: 'all 0.3s ease', zIndex: 2 }} />
+                                                                )
+                                                            )}
+
                                                         </Box>
                                                     </TableCell>
                                                 </TableRow>
@@ -571,7 +628,6 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
                     </Table>
                 </TableContainer>
             </Paper>
-
         </Box>
     );
 }
