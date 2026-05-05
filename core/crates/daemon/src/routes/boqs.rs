@@ -36,7 +36,10 @@ fn bool_or_int<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> 
     use serde::Deserialize;
     #[derive(Deserialize)]
     #[serde(untagged)]
-    enum BoolOrInt { Bool(bool), Int(i64) }
+    enum BoolOrInt {
+        Bool(bool),
+        Int(i64),
+    }
     match BoolOrInt::deserialize(d)? {
         BoolOrInt::Bool(b) => Ok(if b { 1 } else { 0 }),
         BoolOrInt::Int(n) => Ok(n),
@@ -47,7 +50,10 @@ fn number_to_i64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error
     use serde::Deserialize;
     #[derive(Deserialize)]
     #[serde(untagged)]
-    enum Num { Int(i64), Float(f64) }
+    enum Num {
+        Int(i64),
+        Float(f64),
+    }
     match Num::deserialize(d)? {
         Num::Int(n) => Ok(n),
         Num::Float(f) => Ok(f as i64),
@@ -92,7 +98,7 @@ pub async fn get_project_boqs(
             .bind(pid)
             .fetch_all(&pool)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string()),
     )
 }
 
@@ -121,10 +127,9 @@ pub async fn add_project_boq(
             .execute(&pool)
             .await
             .map(|_| id)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string()),
     )
 }
-
 
 pub async fn update_project_boq(
     State(pool): State<SqlitePool>,
@@ -132,19 +137,35 @@ pub async fn update_project_boq(
     Json(payload): Json<std::collections::HashMap<String, serde_json::Value>>,
 ) -> Result<Json<ApiResponse<bool>>, (StatusCode, Json<ApiResponse<()>>)> {
     // Allowed columns for safe partial update
-    let allowed = ["slNo", "isCustom", "itemCode", "description", "unit", "rate",
-                   "qty", "formulaStr", "measurements", "phase", "lockedRate",
-                   "masterBoqId", "projectId"];
+    let allowed = [
+        "slNo",
+        "isCustom",
+        "itemCode",
+        "description",
+        "unit",
+        "rate",
+        "qty",
+        "formulaStr",
+        "measurements",
+        "phase",
+        "lockedRate",
+        "masterBoqId",
+        "projectId",
+    ];
 
     let mut sets: Vec<String> = Vec::new();
     let mut values: Vec<String> = Vec::new();
 
     for (key, val) in &payload {
-        if !allowed.contains(&key.as_str()) { continue; }
+        if !allowed.contains(&key.as_str()) {
+            continue;
+        }
         sets.push(format!("{} = ?", key));
         match val {
             serde_json::Value::Null => values.push("__NULL__".to_string()),
-            serde_json::Value::Bool(b) => values.push(if *b { "1".to_string() } else { "0".to_string() }),
+            serde_json::Value::Bool(b) => {
+                values.push(if *b { "1".to_string() } else { "0".to_string() })
+            }
             serde_json::Value::Number(n) => values.push(n.to_string()),
             serde_json::Value::String(s) => values.push(s.clone()),
             // Arrays/objects must be JSON-stringified client-side but handle gracefully
@@ -165,9 +186,15 @@ pub async fn update_project_boq(
             query = query.bind(val.as_str());
         }
     }
-    api_response(query.bind(&id).execute(&pool).await.map(|_| true).map_err(|e| e.to_string()))
+    api_response(
+        query
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .map(|_| true)
+            .map_err(|e| e.to_string()),
+    )
 }
-
 
 pub async fn delete_project_boq(
     State(pool): State<SqlitePool>,
@@ -179,7 +206,7 @@ pub async fn delete_project_boq(
             .execute(&pool)
             .await
             .map(|_| true)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string()),
     )
 }
 
@@ -208,7 +235,7 @@ pub async fn get_master_boqs(
         sqlx::query_as::<_, MasterBoq>("SELECT * FROM master_boq")
             .fetch_all(&pool)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string()),
     )
 }
 
@@ -217,6 +244,8 @@ pub async fn save_master_boq(
     Json(data): Json<SaveMasterBoq>,
 ) -> Result<Json<ApiResponse<String>>, (StatusCode, Json<ApiResponse<()>>)> {
     let p = data.payload;
+
+    // 1. If we have an ID and we are NOT saving as new, do a standard UPDATE.
     if let Some(id) = &data.id {
         if !data.is_new {
             return api_response(sqlx::query("UPDATE master_boq SET itemCode=?, description=?, unit=?, overhead=?, profit=?, components=? WHERE id=?")
@@ -224,7 +253,14 @@ pub async fn save_master_boq(
                 .execute(&pool).await.map(|_| id.clone()).map_err(|e| e.to_string()));
         }
     }
-    let insert_id = data.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    // 2. 🔥 THE FIX: If is_new is true, FORCE a new UUID, even if the frontend accidentally sent the old one!
+    let insert_id = if data.is_new {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        data.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    };
+
     api_response(sqlx::query("INSERT INTO master_boq (id, itemCode, description, unit, overhead, profit, components) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .bind(&insert_id).bind(&p.item_code).bind(&p.description).bind(&p.unit).bind(p.overhead).bind(p.profit).bind(p.components.unwrap_or_else(|| "[]".into()))
         .execute(&pool).await.map(|_| insert_id).map_err(|e| e.to_string()))
@@ -240,6 +276,6 @@ pub async fn delete_master_boq(
             .execute(&pool)
             .await
             .map(|_| true)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string()),
     )
 }
