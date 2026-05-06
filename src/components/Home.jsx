@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import {
     Box, Typography, Paper, Grid, Avatar,
-    useTheme, Divider, Chip, Stack, alpha
+    useTheme, Divider, Chip, Stack, alpha,
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, LinearProgress
 } from "@mui/material";
 import {
     PieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip,
@@ -29,7 +30,8 @@ import { useSettings } from "../context/SettingsContext";
 export default function Home() {
     const theme = useTheme();
     const { currentUser } = useAuth();
-    const { settings } = useSettings();
+    // 🔥 FIX: Destructured formatCurrency so we can display beautiful revenue numbers
+    const { settings, formatCurrency } = useSettings();
 
     const [brandName, setBrandName] = useState("");
     const [brandLogo, setBrandLogo] = useState("");
@@ -101,6 +103,33 @@ export default function Home() {
 
     const networkMixData = useMemo(() => Object.entries(statsData.crm).map(([subject, A]) => ({ subject, A })), [statsData.crm]);
 
+    // 🔥 NEW: Extract and calculate metrics for ACTIVE projects only
+    const activeProjectsList = useMemo(() => {
+        return projects
+            .filter(p => p.status === 'Active' || p.status === 'In Progress')
+            .map(p => {
+                let progress = 0;
+                let billed = 0;
+
+                try {
+                    const tasks = p.ganttTasks ? JSON.parse(p.ganttTasks) : [];
+                    if (tasks.length > 0) {
+                        const completed = tasks.filter(t => t.status === 'Completed').length;
+                        progress = Math.round((completed / tasks.length) * 100);
+                    }
+                } catch (e) { }
+
+                try {
+                    const bills = p.raBills ? JSON.parse(p.raBills) : [];
+                    billed = bills.reduce((sum, b) => sum + Number(b.subTotal || 0), 0);
+                } catch (e) { }
+
+                return { ...p, progress, billed };
+            })
+            // Sort by progress (lowest completion first so they get attention)
+            .sort((a, b) => a.progress - b.progress);
+    }, [projects]);
+
     const CHART_COLORS = [theme.palette.primary.main, theme.palette.success.main, theme.palette.warning.main, theme.palette.secondary.main];
 
     const StatTile = ({ title, value, icon, color }) => (
@@ -136,7 +165,6 @@ export default function Home() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflowY: 'auto', p: { xs: 2, md: 4 } }}>
-            {/* 🔥 FIXED: Replaced Container with a 100% width Box */}
             <Box sx={{ width: '100%' }}>
 
                 <Box sx={{ mb: 4, pb: 4, borderBottom: '1px solid', borderColor: 'divider' }}>
@@ -203,19 +231,17 @@ export default function Home() {
                     </Grid>
                 </Grid>
 
-                {/* CHARTS ROW WITH FIXES */}
+                {/* CHARTS ROW */}
                 <Grid container spacing={3} sx={{ mb: 4 }}>
                     <Grid item xs={12} lg={4}>
                         <Paper sx={{ p: 3, borderRadius: 3, bgcolor: alpha(theme.palette.background.paper, 0.3), border: '1px solid', borderColor: 'divider', height: 400 }}>
                             <Typography variant="subtitle2" sx={{ fontFamily: "'JetBrains Mono', monospace", mb: 3, opacity: 0.7 }}>PROJECT_LIFECYCLE</Typography>
-                            {/* 🔥 Box wrapper ensures size is always available to ResponsiveContainer */}
                             <Box sx={{ height: 300, width: '100%', minWidth: 0 }}>
                                 <ResponsiveContainer>
                                     <PieChart>
                                         <Pie data={projectStatusData} innerRadius={70} outerRadius={90} paddingAngle={8} dataKey="value">
                                             {projectStatusData.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
                                         </Pie>
-                                        {/* 🔥 Fixed Tooltip styling to avoid React errors */}
                                         <ReTooltip
                                             contentStyle={{ backgroundColor: '#0d1f3c', border: 'none', borderRadius: '8px' }}
                                             itemStyle={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}
@@ -259,6 +285,55 @@ export default function Home() {
                         </Paper>
                     </Grid>
                 </Grid>
+
+                {/* 🔥 NEW: ACTIVE PROJECT TRACKER */}
+                <Box sx={{ mb: 4 }}>
+                    <Typography variant="subtitle2" sx={{ fontFamily: "'JetBrains Mono', monospace", mb: 2, opacity: 0.7 }}>ACTIVE_PROJECT_TRACKER</Typography>
+                    <TableContainer component={Paper} sx={{ borderRadius: 3, bgcolor: alpha(theme.palette.background.paper, 0.3), border: '1px solid', borderColor: 'divider' }}>
+                        <Table size="small">
+                            <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.2)' }}>
+                                <TableRow>
+                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'text.secondary' }}>CODE</TableCell>
+                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'text.secondary' }}>PROJECT NAME</TableCell>
+                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'text.secondary' }}>CLIENT</TableCell>
+                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'text.secondary' }}>REGION</TableCell>
+                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'text.secondary', width: '20%' }}>TASK PROGRESS</TableCell>
+                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'text.secondary' }} align="right">BILLED REVENUE</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {activeProjectsList.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>NO ACTIVE PROJECTS FOUND</TableCell>
+                                    </TableRow>
+                                ) : (
+                                    activeProjectsList.map(proj => (
+                                        <TableRow key={proj.id} hover sx={{ '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.05) } }}>
+                                            <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', fontWeight: 'bold' }}>{proj.code || '-'}</TableCell>
+                                            <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', color: 'primary.light' }}>{proj.name}</TableCell>
+                                            <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: 'text.secondary' }}>{proj.clientName || 'Internal / Open'}</TableCell>
+                                            <TableCell>
+                                                <Chip label={proj.region || 'Unassigned'} size="small" sx={{ height: 20, fontSize: '10px', fontFamily: "'JetBrains Mono', monospace", bgcolor: alpha(theme.palette.secondary.main, 0.1), color: 'secondary.light' }} />
+                                            </TableCell>
+                                            <TableCell>
+                                                <Box display="flex" alignItems="center" gap={1.5}>
+                                                    <Box width="100%">
+                                                        <LinearProgress variant="determinate" value={proj.progress} color={proj.progress === 100 ? "success" : "info"} sx={{ height: 6, borderRadius: 5, bgcolor: 'rgba(255,255,255,0.1)' }} />
+                                                    </Box>
+                                                    <Typography variant="caption" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', minWidth: '35px', fontWeight: 'bold' }}>{proj.progress}%</Typography>
+                                                </Box>
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', fontWeight: 'bold', color: 'success.light' }}>
+                                                {formatCurrency ? formatCurrency(proj.billed) : `$${proj.billed}`}
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
+                </Box>
+
             </Box>
         </Box>
     );

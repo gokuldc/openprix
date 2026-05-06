@@ -4,7 +4,7 @@ import {
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
     Chip, TextField, IconButton, Dialog, DialogTitle,
     DialogContent, DialogActions, MenuItem, Divider, Tooltip,
-    List, ListItem, ListItemButton, ListItemIcon, ListItemText
+    List, ListItem, ListItemButton, ListItemIcon, ListItemText, Link
 } from '@mui/material';
 
 // Icons
@@ -18,6 +18,8 @@ import ApartmentIcon from '@mui/icons-material/Apartment';
 import VpnKeyIcon from '@mui/icons-material/VpnKey';
 import MenuIcon from '@mui/icons-material/Menu';
 import MenuOpenIcon from '@mui/icons-material/MenuOpen';
+import PhoneIcon from '@mui/icons-material/Phone';
+import EmailIcon from '@mui/icons-material/Email';
 
 import { useAuth } from '../context/AuthContext';
 
@@ -96,17 +98,15 @@ export default function Directory() {
         };
 
         if (tab === 'crm') {
-            // 🔥 CLEANUP: Ensure no internal staff columns leak into the CRM payload
             delete payload.accessLevel;
             delete payload.username;
             delete payload.password;
             delete payload.role;
             delete payload.department;
             delete payload.designation;
-            
+
             await window.api.db.saveCrmContact(payload);
         } else {
-            // Set staff-specific fields
             payload.accessLevel = parseInt(formData.accessLevel, 10) || 1;
             if (payload.username) {
                 payload.username = payload.username.trim().toLowerCase().replace(/\s+/g, '');
@@ -138,7 +138,6 @@ export default function Directory() {
     };
 
     const canCreateEntry = tab === 'crm' ? hasClearance(3) : hasClearance(5);
-
     const isEditingOtherUser = !!editId && formData.id !== currentUser?.id;
 
     const NAV_ITEMS = useMemo(() => {
@@ -233,7 +232,6 @@ export default function Directory() {
                 <Box onClick={() => setSidebarOpen(false)} sx={{ display: { xs: 'block', md: 'none' }, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, bgcolor: 'rgba(0,0,0,0.5)', zIndex: 1000 }} />
             )}
 
-            {/* 🔥 FIXED: Removed flex layout properties so the container behaves as a normal scrolling block. */}
             <Box sx={{ flexGrow: 1, height: '100%', overflowY: 'auto', overflowX: 'hidden', p: { xs: 2, md: 3 }, pb: { xs: 12, md: 3 } }}>
 
                 <Box sx={{
@@ -268,7 +266,6 @@ export default function Directory() {
                     <Grid item xs={12} sm={6} md={3}><MetricCard title="ACTIVE_CLIENTS" value={stats.clients} icon={<GroupsIcon />} color="success" /></Grid>
                 </Grid>
 
-                {/* 🔥 FIXED: Removed flexGrow completely. It will now render exactly at its natural height without squishing or disappearing. */}
                 <TableContainer component={Paper} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)', overflowX: 'auto', mb: { xs: 2, md: 0 } }}>
                     <Table size="small">
                         <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.3)' }}>
@@ -276,6 +273,8 @@ export default function Directory() {
                                 <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', fontSize: '11px', whiteSpace: 'nowrap' }}>IDENTITY</TableCell>
                                 <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', fontSize: '11px', whiteSpace: 'nowrap' }}>{tab === 'crm' ? 'ENTITY_COMPANY' : 'ROLE_DESIGNATION'}</TableCell>
                                 <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', fontSize: '11px', whiteSpace: 'nowrap' }}>{tab === 'crm' ? 'TYPE' : 'DEPT'}</TableCell>
+                                {/* 🔥 NEW: Consolidated Clickable Contact Column */}
+                                <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', fontSize: '11px', whiteSpace: 'nowrap' }}>CONTACT</TableCell>
                                 {tab === 'org' && <TableCell align="center" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', fontSize: '11px', whiteSpace: 'nowrap' }}>SYSTEM_ACCESS</TableCell>}
                                 <TableCell align="right" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', fontSize: '11px', whiteSpace: 'nowrap' }}>ACTIONS</TableCell>
                             </TableRow>
@@ -292,6 +291,26 @@ export default function Directory() {
                                     <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', color: 'text.secondary', whiteSpace: 'nowrap' }}>{tab === 'crm' ? item.company : item.designation}</TableCell>
                                     <TableCell sx={{ whiteSpace: 'nowrap' }}>
                                         <Chip label={tab === 'crm' ? item.type : item.department} size="small" variant="outlined" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', borderRadius: 1 }} />
+                                    </TableCell>
+
+                                    {/* 🔥 NEW: Stacked Call and Mailto links */}
+                                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                                        {item.phone || item.email ? (
+                                            <Box display="flex" flexDirection="column" gap={0.5}>
+                                                {item.phone && (
+                                                    <Link href={`tel:${item.phone}`} underline="hover" color="info.main" sx={{ display: 'flex', alignItems: 'center', gap: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>
+                                                        <PhoneIcon sx={{ fontSize: 12 }} /> {item.phone}
+                                                    </Link>
+                                                )}
+                                                {item.email && (
+                                                    <Link href={`mailto:${item.email}`} underline="hover" color="success.main" sx={{ display: 'flex', alignItems: 'center', gap: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>
+                                                        <EmailIcon sx={{ fontSize: 12 }} /> {item.email}
+                                                    </Link>
+                                                )}
+                                            </Box>
+                                        ) : (
+                                            <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>-</Typography>
+                                        )}
                                     </TableCell>
 
                                     {tab === 'org' && (

@@ -83,7 +83,14 @@ async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let port = 3000;
+    // Read port from config file written by the TUI, or fall back to 3000
+    let port: u16 = fs::read_to_string("../.daemon_config.json")
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("port").and_then(|p| p.as_u64()))
+        .map(|p| p as u16)
+        .unwrap_or(3000);
+
     let db_url = "sqlite://../database.sqlite";
 
     println!("Booting OpenPrix Rust Daemon...");

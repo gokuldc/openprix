@@ -8,7 +8,7 @@ export default function ServerManager() {
     const handleConnectRemote = () => {
         let finalUrl = remoteUrl.trim();
         if (!finalUrl) return alert("Please enter a valid URL or IP address.");
-        
+
         // Auto-prepend http:// if the user just types an IP like "192.168.1.5:3000"
         if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
             finalUrl = `http://${finalUrl}`;
@@ -17,7 +17,7 @@ export default function ServerManager() {
         // Save the target to sessionStorage and reload the app to re-initialize the API bridge
         sessionStorage.setItem('openprix_server_url', finalUrl);
         alert(`Client successfully configured to target Host: ${finalUrl}\n\nPlease log in again.`);
-        window.location.href = '/'; 
+        window.location.href = '/';
     };
 
     return (
@@ -29,7 +29,8 @@ export default function ServerManager() {
             </Box>
 
             <Grid container spacing={4}>
-                <Grid item xs={12} md={8} lg={6}>
+                {/* 🔥 FIX: Changed to xs={12} to force the box to span the full width of the container */}
+                <Grid item xs={12}>
                     <Paper sx={{ p: { xs: 3, md: 4 }, bgcolor: 'rgba(59, 130, 246, 0.05)', border: '1px solid', borderColor: 'primary.dark', borderRadius: 2 }}>
                         <Box display="flex" alignItems="center" gap={2} mb={2}>
                             <CastConnectedIcon color="primary" sx={{ fontSize: 32 }} />
@@ -54,9 +55,9 @@ export default function ServerManager() {
                                 InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }}
                                 InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '14px' } }}
                             />
-                            <Button 
-                                variant="contained" 
-                                color="primary" 
+                            <Button
+                                variant="contained"
+                                color="primary"
                                 onClick={handleConnectRemote}
                                 sx={{ fontFamily: "'JetBrains Mono', monospace", minWidth: 140 }}
                             >
