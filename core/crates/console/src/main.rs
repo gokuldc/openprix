@@ -1,62 +1,184 @@
-use ratatui::{
-    crossterm::event::{self, Event, KeyCode},
-    prelude::*,
-    widgets::{Block, Borders, Paragraph},
-};
-use shared::DaemonStatus;
-use std::{fs, io, time::Duration};
+mod app;
+mod ui;
 
-fn main() -> io::Result<()> {
-    // 1. SETUP (Ratatui 0.30 handles all the crossterm boilerplate for us!)
+use app::{App, Page, ResourceFocus, ServerFocus};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use std::time::Duration;
+use tui_input::backend::crossterm::EventHandler;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = ratatui::init();
+    let mut app = App::new().await?;
 
-    // 2. THE MAIN EVENT LOOP
+    let mut last_tick = std::time::Instant::now();
+    let tick_rate = Duration::from_millis(1000);
+
     loop {
-        // Draw the UI
-        terminal.draw(|f| ui(f))?;
+        terminal.draw(|f| ui::ui(f, &mut app))?;
 
-        // Wait up to 250ms for a keyboard event
-        if event::poll(Duration::from_millis(250))? {
+        let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+        if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                match key.code {
-                    // Press 'q' or 'Esc' to quit
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    _ => {}
+                if key.kind == KeyEventKind::Press {
+                    // --- Form Input Handling for Resources Page ---
+                    if app.active_page == Page::Resources {
+                        // 🔥 Intercept inputs for the Region Manager if it's open
+                        if app.show_region_manager {
+                            match key.code {
+                                KeyCode::Esc | KeyCode::F(6) => {
+                                    app.show_region_manager = false;
+                                    continue;
+                                }
+                                KeyCode::Up => {
+                                    app.scroll_region_up();
+                                    continue;
+                                }
+                                KeyCode::Down => {
+                                    app.scroll_region_down();
+                                    continue;
+                                }
+                                KeyCode::Enter => {
+                                    app.submit_region().await;
+                                    continue;
+                                }
+                                KeyCode::F(4) => {
+                                    app.delete_selected_region().await;
+                                    continue;
+                                }
+                                _ => {
+                                    app.region_input.handle_event(&Event::Key(key));
+                                    continue;
+                                }
+                            }
+                        }
+
+                        // Otherwise, route inputs to the main Resources form
+                        match key.code {
+                            KeyCode::PageDown => {
+                                app.scroll_table_down();
+                                continue;
+                            }
+                            KeyCode::PageUp => {
+                                app.scroll_table_up();
+                                continue;
+                            }
+
+                            KeyCode::F(2) => {
+                                app.load_selected_resource();
+                                continue;
+                            }
+                            KeyCode::F(3) => {
+                                app.clear_resource_form();
+                                continue;
+                            }
+                            KeyCode::F(4) => {
+                                app.delete_selected_resource().await;
+                                continue;
+                            }
+                            KeyCode::F(6) => {
+                                app.show_region_manager = true;
+                                continue;
+                            }
+
+                            KeyCode::Up => {
+                                app.res_focus = match app.res_focus {
+                                    ResourceFocus::Code => ResourceFocus::Submit,
+                                    ResourceFocus::Description => ResourceFocus::Code,
+                                    ResourceFocus::Unit => ResourceFocus::Description,
+                                    ResourceFocus::Rate => ResourceFocus::Unit,
+                                    ResourceFocus::Submit => ResourceFocus::Rate,
+                                };
+                                continue;
+                            }
+                            KeyCode::Down | KeyCode::Enter => {
+                                if key.code == KeyCode::Enter
+                                    && app.res_focus == ResourceFocus::Submit
+                                {
+                                    app.submit_resource().await;
+                                    continue;
+                                }
+
+                                app.res_focus = match app.res_focus {
+                                    ResourceFocus::Code => ResourceFocus::Description,
+                                    ResourceFocus::Description => ResourceFocus::Unit,
+                                    ResourceFocus::Unit => ResourceFocus::Rate,
+                                    ResourceFocus::Rate => ResourceFocus::Submit,
+                                    ResourceFocus::Submit => ResourceFocus::Code,
+                                };
+                                continue;
+                            }
+                            _ => {}
+                        }
+
+                        match app.res_focus {
+                            ResourceFocus::Code => {
+                                app.res_code.handle_event(&Event::Key(key));
+                            }
+                            ResourceFocus::Description => {
+                                app.res_desc.handle_event(&Event::Key(key));
+                            }
+                            ResourceFocus::Unit => {
+                                app.res_unit.handle_event(&Event::Key(key));
+                            }
+                            ResourceFocus::Rate => {
+                                app.res_rate.handle_event(&Event::Key(key));
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // Server Page Routing
+                    if app.active_page == Page::ServerManager {
+                        match key.code {
+                            KeyCode::Tab => {
+                                app.server_focus = match app.server_focus {
+                                    ServerFocus::PortInput => ServerFocus::StartStop,
+                                    ServerFocus::StartStop => ServerFocus::TrafficTable,
+                                    ServerFocus::TrafficTable => ServerFocus::LogArea,
+                                    ServerFocus::LogArea => ServerFocus::PortInput,
+                                };
+                                continue;
+                            }
+                            KeyCode::Enter if app.server_focus == ServerFocus::PortInput => {
+                                app.apply_server_config().await;
+                                continue;
+                            }
+                            KeyCode::Enter if app.server_focus == ServerFocus::StartStop => {
+                                app.toggle_server().await;
+                                continue;
+                            }
+                            _ => {}
+                        }
+
+                        if app.server_focus == ServerFocus::PortInput {
+                            app.server_port_input.handle_event(&Event::Key(key));
+                            continue;
+                        }
+                    }
+
+                    // Global Navigation
+                    match key.code {
+                        KeyCode::Esc => app.should_quit = true,
+                        KeyCode::Right | KeyCode::Tab => app.next_page(),
+                        KeyCode::Left | KeyCode::BackTab => app.previous_page(),
+                        KeyCode::F(5) => app.refresh_data().await,
+                        _ => {}
+                    }
                 }
             }
         }
+
+        if last_tick.elapsed() >= tick_rate {
+            app.refresh_data().await;
+            last_tick = std::time::Instant::now();
+        }
+
+        if app.should_quit {
+            break;
+        }
     }
 
-    // 3. CLEANUP (Safely restores the user's terminal)
     ratatui::restore();
-
     Ok(())
-}
-
-// --- THE RENDER ENGINE ---
-fn ui(frame: &mut Frame) {
-    let status_text = match fs::read_to_string("../.daemon_status.json") {
-        Ok(contents) => {
-            if let Ok(daemon) = serde_json::from_str::<DaemonStatus>(&contents) {
-                format!(
-                    "SYSTEM ONLINE\nStatus: {}\nPort: {}\nURL: {}\nPID: {}",
-                    daemon.status.to_uppercase(),
-                    daemon.port,
-                    daemon.url.unwrap_or_default(),
-                    daemon.pid
-                )
-            } else {
-                "Error parsing daemon status.".to_string()
-            }
-        }
-        Err(_) => "SYSTEM OFFLINE\nNo background process detected.".to_string(),
-    };
-
-    let paragraph = Paragraph::new(status_text)
-        .block(Block::default().title(" DAEMON STATUS ").borders(Borders::ALL))
-        .style(Style::default().fg(Color::Green))
-        .alignment(Alignment::Left);
-
-    // 🔥 frame.area() works natively here!
-    frame.render_widget(paragraph, frame.area());
 }
