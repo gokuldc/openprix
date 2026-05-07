@@ -3,6 +3,7 @@ use axum::{
     http::Method,
     routing::{delete, get, post, put},
 };
+use serde_json::Value;
 use shared::DaemonStatus;
 use sqlx::{
     SqlitePool,
@@ -14,31 +15,29 @@ use tower_http::cors::CorsLayer;
 
 mod routes;
 
-// 🚀 NEW: The Database Initialization Function
+// 🔥 NEW: Universal Path Resolver
+pub fn get_openprix_dir() -> std::path::PathBuf {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    let dir = std::path::Path::new(&home).join(".openprix");
+    std::fs::create_dir_all(&dir).unwrap_or_default();
+    dir
+}
+
 async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
     let schema = "
         CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT);
-        
         CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT, code TEXT, clientName TEXT, status TEXT, region TEXT, projectLead TEXT, siteSupervisor TEXT, pmc TEXT, architect TEXT, structuralEngineer TEXT, isPriceLocked INTEGER, dailyLogs TEXT, actualResources TEXT, ganttTasks TEXT, subcontractors TEXT, phaseAssignments TEXT, createdAt INTEGER, raBills TEXT, purchaseOrders TEXT, materialRequests TEXT, grns TEXT, type TEXT, location TEXT, isScaffolded INTEGER, scaffoldPath TEXT, isManuallyLinked INTEGER, dailySchedules TEXT, resourceTrackingMode TEXT, assignedStaff TEXT);
-        
         CREATE TABLE IF NOT EXISTS project_boq (id TEXT PRIMARY KEY, projectId TEXT, masterBoqId TEXT, slNo INTEGER, isCustom INTEGER, itemCode TEXT, description TEXT, unit TEXT, rate REAL, formulaStr TEXT, qty REAL, measurements TEXT, phase TEXT, lockedRate REAL);
-        
         CREATE TABLE IF NOT EXISTS master_boq (id TEXT PRIMARY KEY, itemCode TEXT, description TEXT, unit TEXT, overhead REAL, profit REAL, components TEXT);
-        
         CREATE TABLE IF NOT EXISTS resources (id TEXT PRIMARY KEY, code TEXT, description TEXT, unit TEXT, rates TEXT, rateHistory TEXT);
-        
         CREATE TABLE IF NOT EXISTS regions (id TEXT PRIMARY KEY, name TEXT);
-        
         CREATE TABLE IF NOT EXISTS crm_contacts (id TEXT PRIMARY KEY, name TEXT, company TEXT, type TEXT, status TEXT, email TEXT, phone TEXT, createdAt INTEGER);
-        
         CREATE TABLE IF NOT EXISTS org_staff (id TEXT PRIMARY KEY, name TEXT, designation TEXT, department TEXT, status TEXT, email TEXT, phone TEXT, createdAt INTEGER, username TEXT, password TEXT, role TEXT, accessLevel INTEGER);
-        
         CREATE TABLE IF NOT EXISTS staff_work_logs (id TEXT PRIMARY KEY, date TEXT, staffId TEXT, slNo INTEGER, projectId TEXT, details TEXT, remarks TEXT, status TEXT, createdAt INTEGER);
-        
         CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, projectId TEXT, senderId TEXT, content TEXT, replyToId TEXT, createdAt INTEGER);
-        
         CREATE TABLE IF NOT EXISTS private_messages (id TEXT PRIMARY KEY, senderId TEXT, receiverId TEXT, content TEXT, replyToId TEXT, createdAt INTEGER);
-        
         CREATE TABLE IF NOT EXISTS project_documents (id TEXT PRIMARY KEY, projectId TEXT, name TEXT, category TEXT, filePath TEXT, fileType TEXT, addedAt INTEGER);
     ";
 
@@ -53,7 +52,6 @@ async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
             INSERT INTO org_staff (id, name, designation, department, status, email, phone, createdAt, username, password, role, accessLevel)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ";
-        
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -74,27 +72,31 @@ async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
             .bind(5)
             .execute(pool)
             .await?;
-        
         println!("Default admin account created.");
     }
-
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Read port from config file written by the TUI, or fall back to 3000
-    let port: u16 = fs::read_to_string("../.daemon_config.json")
+    // 🔥 FIX: Bind everything to the User Profile directory
+    let root_dir = get_openprix_dir();
+    let config_path = root_dir.join(".daemon_config.json");
+    let status_path = root_dir.join(".daemon_status.json");
+    let db_path = root_dir.join("database.sqlite");
+
+    let port: u16 = fs::read_to_string(&config_path)
         .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .and_then(|v| v.get("port").and_then(|p| p.as_u64()))
         .map(|p| p as u16)
         .unwrap_or(3000);
 
-    let db_url = "sqlite://../database.sqlite";
+    // Format SQLx URI safely for Windows paths
+    let db_url = format!("sqlite://{}", db_path.to_str().unwrap_or(""));
 
     println!("Booting OpenPrix Rust Daemon...");
-    let connect_options = SqliteConnectOptions::from_str(db_url)?.create_if_missing(true);
+    let connect_options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(connect_options)
@@ -107,9 +109,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .execute(&pool)
         .await?;
 
-    // 🚀 NEW: Run the initialization script
     init_db(&pool).await?;
-    println!("Database verified and initialized.");
+    println!(
+        "Database verified and initialized at: {}",
+        db_path.display()
+    );
 
     let cors = CorsLayer::new()
         .allow_origin([
@@ -237,7 +241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         url: Some(format!("http://127.0.0.1:{}", port)),
         pid: process::id(),
     };
-    fs::write("../.daemon_status.json", serde_json::to_string(&status)?)?;
+    fs::write(status_path, serde_json::to_string(&status)?)?;
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("Daemon running on {}", addr);
