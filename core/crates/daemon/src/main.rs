@@ -1,5 +1,6 @@
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     http::Method,
     routing::{delete, get, post, put},
 };
@@ -232,6 +233,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(routes::messages::check_notifications),
         )
         .route("/api/kanban", get(routes::messages::get_kanban_tasks))
+        .layer(DefaultBodyLimit::disable())
         .layer(cors)
         .with_state(pool);
 

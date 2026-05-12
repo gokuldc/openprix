@@ -1,4 +1,5 @@
 pub mod dashboard;
+pub mod databook;
 pub mod resources;
 pub mod server;
 
@@ -28,7 +29,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     match app.active_page {
         Page::Dashboard => dashboard::render(f, app, chunks[1]),
         Page::Resources => resources::render(f, app, chunks[1]), // Now safely receives &mut App
-        Page::Databook => render_placeholder(f, " DATABOOK ASSEMBLY (PRESS TAB) ", chunks[1]),
+        Page::Databook => databook::render(f, app, chunks[1]),
         Page::ProjectArchive => render_placeholder(f, " PROJECT ARCHIVE (PRESS TAB) ", chunks[1]),
         Page::Directory => render_placeholder(f, " ORG & CRM DIRECTORY (PRESS TAB) ", chunks[1]),
         Page::ServerManager => server::render(f, app, chunks[1]),

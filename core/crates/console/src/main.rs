@@ -1,7 +1,7 @@
 mod app;
 mod ui;
 
-use app::{App, Page, ResourceFocus, ServerFocus};
+use app::{App, DatabookFocus, Page, ResourceFocus, ServerFocus};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use std::time::Duration;
 use tui_input::backend::crossterm::EventHandler;
@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if key.kind == KeyEventKind::Press {
                     // --- Form Input Handling for Resources Page ---
                     if app.active_page == Page::Resources {
-                        // 🔥 Intercept inputs for the Region Manager if it's open
+                        // Intercept inputs for the Region Manager if it's open
                         if app.show_region_manager {
                             match key.code {
                                 KeyCode::Esc | KeyCode::F(6) => {
@@ -63,7 +63,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 app.scroll_table_up();
                                 continue;
                             }
-
                             KeyCode::F(2) => {
                                 app.load_selected_resource();
                                 continue;
@@ -98,7 +97,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     app.submit_resource().await;
                                     continue;
                                 }
-
                                 app.res_focus = match app.res_focus {
                                     ResourceFocus::Code => ResourceFocus::Description,
                                     ResourceFocus::Description => ResourceFocus::Unit,
@@ -128,15 +126,100 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
 
-                    // Server Page Routing
+                    // --- Databook Input Handling ---
+                    if app.active_page == Page::Databook {
+                        match key.code {
+                            KeyCode::PageDown => {
+                                app.scroll_dbk_down();
+                                continue;
+                            }
+                            KeyCode::PageUp => {
+                                app.scroll_dbk_up();
+                                continue;
+                            }
+
+                            KeyCode::F(2) => {
+                                app.load_selected_databook();
+                                continue;
+                            }
+                            KeyCode::F(3) => {
+                                app.clear_databook_form();
+                                continue;
+                            }
+                            KeyCode::F(4) => {
+                                app.delete_selected_databook().await;
+                                continue;
+                            }
+
+                            KeyCode::Up => {
+                                app.dbk_focus = match app.dbk_focus {
+                                    DatabookFocus::Code => DatabookFocus::Submit,
+                                    DatabookFocus::Description => DatabookFocus::Code,
+                                    DatabookFocus::Unit => DatabookFocus::Description,
+                                    DatabookFocus::Margins => DatabookFocus::Unit,
+                                    DatabookFocus::Components => DatabookFocus::Margins,
+                                    DatabookFocus::Submit => DatabookFocus::Components,
+                                };
+                                continue;
+                            }
+                            KeyCode::Down | KeyCode::Enter => {
+                                if key.code == KeyCode::Enter
+                                    && app.dbk_focus == DatabookFocus::Submit
+                                {
+                                    app.submit_databook().await;
+                                    continue;
+                                }
+                                app.dbk_focus = match app.dbk_focus {
+                                    DatabookFocus::Code => DatabookFocus::Description,
+                                    DatabookFocus::Description => DatabookFocus::Unit,
+                                    DatabookFocus::Unit => DatabookFocus::Margins,
+                                    DatabookFocus::Margins => DatabookFocus::Components,
+                                    DatabookFocus::Components => DatabookFocus::Submit,
+                                    DatabookFocus::Submit => DatabookFocus::Code,
+                                };
+                                continue;
+                            }
+                            _ => {}
+                        }
+
+                        match app.dbk_focus {
+                            DatabookFocus::Code => {
+                                app.dbk_code.handle_event(&Event::Key(key));
+                            }
+                            DatabookFocus::Description => {
+                                app.dbk_desc.handle_event(&Event::Key(key));
+                            }
+                            DatabookFocus::Unit => {
+                                app.dbk_unit.handle_event(&Event::Key(key));
+                            }
+                            DatabookFocus::Margins => {
+                                app.dbk_margins.handle_event(&Event::Key(key));
+                            }
+                            DatabookFocus::Components => {
+                                app.dbk_comps.handle_event(&Event::Key(key));
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // --- Server Page Routing ---
                     if app.active_page == Page::ServerManager {
                         match key.code {
-                            KeyCode::Tab => {
+                            KeyCode::Down => {
                                 app.server_focus = match app.server_focus {
                                     ServerFocus::PortInput => ServerFocus::StartStop,
                                     ServerFocus::StartStop => ServerFocus::TrafficTable,
                                     ServerFocus::TrafficTable => ServerFocus::LogArea,
                                     ServerFocus::LogArea => ServerFocus::PortInput,
+                                };
+                                continue;
+                            }
+                            KeyCode::Up => {
+                                app.server_focus = match app.server_focus {
+                                    ServerFocus::PortInput => ServerFocus::LogArea,
+                                    ServerFocus::StartStop => ServerFocus::PortInput,
+                                    ServerFocus::TrafficTable => ServerFocus::StartStop,
+                                    ServerFocus::LogArea => ServerFocus::TrafficTable,
                                 };
                                 continue;
                             }
@@ -157,7 +240,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
 
-                    // Global Navigation
+                    // --- Global Navigation ---
                     match key.code {
                         KeyCode::Esc => app.should_quit = true,
                         KeyCode::Right | KeyCode::Tab => app.next_page(),
