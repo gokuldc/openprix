@@ -1,7 +1,10 @@
 [package]
-name = "daemon"
-version = "0.1.0"
+name = "openprix"
+version = "2.0.0"
 edition = "2024"
+authors = ["GOKUL DC <gokuldc93@gmail.com>"]
+description = "OpenPrix Core: High-performance Engineering ERP & Server Daemon"
+homepage = "https://github.com/gokuldc/openprix"
 
 [dependencies]
 # The web framework (Replacing Express)
@@ -18,3 +21,9 @@ shared = { path = "../shared" }
 tower-http = { version = "0.6", features = ["cors"] }
 uuid = { version = "1.10", features = ["v4"] }
 base64 = "0.22.1"
+rust-embed = "8.0"
+mime_guess = "2.0"
+
+[[bin]]
+name = "openprix"
+path = "src/main.rs"

@@ -9,17 +9,39 @@ if (!window.crypto.randomUUID) {
     };
 }
 
+/**
+ * 🔥 DYNAMIC SERVER DISCOVERY
+ * 1. If we are served by the daemon, our origin is the server.
+ * 2. If we are in Electron, we check localStorage (from our connect screen).
+ * 3. Otherwise, fallback to the default port 3000.
+ */
+const getTargetUrl = () => {
+    // If we are NOT on the Vite dev port (5173), we are likely being served by the Rust Daemon
+    if (window.location.port !== '5173' && window.location.hostname !== 'localhost') {
+        return window.location.origin;
+    }
+    // Check if we saved a URL during the Electron connection phase
+    const saved = localStorage.getItem('openprix_last_server');
+    if (saved) return saved;
+
+    return 'http://127.0.0.1:3000'; // Default Fallback
+};
+
+const SERVER_URL = getTargetUrl();
+console.log(`[OpenPrix] Connecting to Nexus Daemon at: ${SERVER_URL}`);
+
 // 🚀 THE PURE REST CLIENT
 const restCall = async (method, endpoint, data = null) => {
     try {
-        const targetUrl = sessionStorage.getItem('openprix_server_url') || 'http://127.0.0.1:3000';
         const options = { method, headers: { 'Content-Type': 'application/json' } };
         if (data) options.body = JSON.stringify(data);
 
-        const res = await fetch(`${targetUrl}${endpoint}`, options);
+        const res = await fetch(`${SERVER_URL}${endpoint}`, options);
         const json = await res.json();
-        if (!json.success) throw new Error(json.error);
-        return json.data;
+
+        // Handle standard success/data wrapping from our Rust routes
+        if (json.success === false) throw new Error(json.error || "Server Error");
+        return json.data !== undefined ? json.data : json;
     } catch (error) {
         console.error(`Network REST Error [${method} ${endpoint}]:`, error);
         return { success: false, error: error.message };
@@ -49,15 +71,17 @@ const webOsFallbacks = {
     pickFile: () => webPickFile(),
     pickDirectory: async () => prompt("Host Server Path Mapping:\nBecause you are on a remote web browser, please type the absolute path ON THE HOST SERVER where projects should be scaffolded (e.g., C:/OpenPrix/Projects):") || null,
     openFile: (filePath) => {
-        const targetUrl = sessionStorage.getItem('openprix_server_url') || 'http://127.0.0.1:3000';
-        window.open(`${targetUrl}/api/os/download?path=${encodeURIComponent(filePath)}`, '_blank');
+        window.open(`${SERVER_URL}/api/os/download?path=${encodeURIComponent(filePath)}`, '_blank');
     },
     getBase64: async (filePath) => {
         try {
-            const targetUrl = sessionStorage.getItem('openprix_server_url') || 'http://127.0.0.1:3000';
-            const res = await fetch(`${targetUrl}/api/os/download?path=${encodeURIComponent(filePath)}`);
+            const res = await fetch(`${SERVER_URL}/api/os/download?path=${encodeURIComponent(filePath)}`);
             const blob = await res.blob();
-            return new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsDataURL(blob); });
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.readAsDataURL(blob);
+            });
         } catch { return null; }
     }
 };
@@ -122,5 +146,5 @@ window.api = {
         checkNotifications: (id, lc) => restCall('GET', `/api/notifications/check`),
         getKanbanTasks: () => restCall('GET', '/api/kanban'),
     },
-    os: { ...(window.electronHost ? window.electronHost.os : webOsFallbacks), ...osNetworkCalls }
+    os: { ...(window.electronHost && window.electronHost.os ? window.electronHost.os : webOsFallbacks), ...osNetworkCalls }
 };

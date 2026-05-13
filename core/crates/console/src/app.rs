@@ -1,7 +1,7 @@
 use chrono::Local;
 use ratatui::widgets::TableState;
 use serde_json::Value;
-use shared::{DaemonStatus, MasterBoq, Region, Resource};
+use shared::{CrmContact, DaemonStatus, MasterBoq, Project, Region, Resource, Staff};
 use sqlx::{
     SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
@@ -17,7 +17,6 @@ pub enum Page {
     Databook,
     ProjectArchive,
     Directory,
-    ServerManager,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -44,6 +43,22 @@ pub enum DatabookFocus {
     Unit,
     Margins,
     Components,
+    Submit,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum DirectoryTab {
+    Staff,
+    Crm,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum DirectoryFocus {
+    Name,
+    CompDept,
+    TypeRole,
+    Email,
+    Phone,
     Submit,
 }
 
@@ -100,6 +115,22 @@ pub struct App {
     pub dbk_comps: Input,
     pub dbk_focus: DatabookFocus,
     pub dbk_status_message: String,
+
+    pub staff_data: Vec<Staff>,
+    pub crm_data: Vec<CrmContact>,
+    pub dir_tab: DirectoryTab,
+    pub dir_table_state: TableState,
+    pub dir_edit_id: Option<String>,
+    pub dir_name: Input,
+    pub dir_comp_dept: Input,
+    pub dir_type_role: Input,
+    pub dir_email: Input,
+    pub dir_phone: Input,
+    pub dir_focus: DirectoryFocus,
+    pub dir_status_message: String,
+
+    pub archive_data: Vec<Project>,
+    pub archive_table_state: TableState,
 }
 
 pub struct ServerRequest {
@@ -158,6 +189,22 @@ impl App {
             dbk_focus: DatabookFocus::Code,
             dbk_status_message: String::new(),
 
+            staff_data: Vec::new(),
+            crm_data: Vec::new(),
+            dir_tab: DirectoryTab::Staff,
+            dir_table_state: TableState::default(),
+            dir_edit_id: None,
+            dir_name: Input::default(),
+            dir_comp_dept: Input::default(),
+            dir_type_role: Input::default(),
+            dir_email: Input::default(),
+            dir_phone: Input::default(),
+            dir_focus: DirectoryFocus::Name,
+            dir_status_message: String::new(),
+
+            archive_data: Vec::new(),
+            archive_table_state: TableState::default(),
+
             server_focus: ServerFocus::PortInput,
             server_port_input: Input::default(),
             server_running: false,
@@ -168,6 +215,12 @@ impl App {
         app.refresh_data().await;
         if !app.databook_data.is_empty() {
             app.dbk_table_state.select(Some(0));
+        }
+        if !app.staff_data.is_empty() {
+            app.dir_table_state.select(Some(0));
+        }
+        if !app.archive_data.is_empty() {
+            app.archive_table_state.select(Some(0));
         }
         Ok(app)
     }
@@ -218,9 +271,22 @@ impl App {
             .fetch_all(&self.db_pool)
             .await
             .unwrap_or_default();
-
         self.databook_data =
             sqlx::query_as::<_, MasterBoq>("SELECT * FROM master_boq ORDER BY itemCode ASC")
+                .fetch_all(&self.db_pool)
+                .await
+                .unwrap_or_default();
+        self.staff_data = sqlx::query_as::<_, Staff>("SELECT * FROM org_staff ORDER BY name ASC")
+            .fetch_all(&self.db_pool)
+            .await
+            .unwrap_or_default();
+        self.crm_data =
+            sqlx::query_as::<_, CrmContact>("SELECT * FROM crm_contacts ORDER BY name ASC")
+                .fetch_all(&self.db_pool)
+                .await
+                .unwrap_or_default();
+        self.archive_data =
+            sqlx::query_as::<_, Project>("SELECT * FROM projects ORDER BY createdAt DESC")
                 .fetch_all(&self.db_pool)
                 .await
                 .unwrap_or_default();
@@ -258,21 +324,225 @@ impl App {
             Page::Resources => Page::Databook,
             Page::Databook => Page::ProjectArchive,
             Page::ProjectArchive => Page::Directory,
-            Page::Directory => Page::ServerManager,
-            Page::ServerManager => Page::Dashboard,
+            Page::Directory => Page::Dashboard,
         };
     }
     pub fn previous_page(&mut self) {
         self.active_page = match self.active_page {
-            Page::Dashboard => Page::ServerManager,
+            Page::Dashboard => Page::Directory,
             Page::Resources => Page::Dashboard,
             Page::Databook => Page::Resources,
             Page::ProjectArchive => Page::Databook,
             Page::Directory => Page::ProjectArchive,
-            Page::ServerManager => Page::Directory,
         };
     }
 
+    // --- Archive Methods ---
+    pub fn scroll_archive_down(&mut self) {
+        let i = match self.archive_table_state.selected() {
+            Some(i) => {
+                if i >= self.archive_data.len().saturating_sub(1) {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.archive_table_state.select(Some(i));
+    }
+    pub fn scroll_archive_up(&mut self) {
+        let i = match self.archive_table_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.archive_data.len().saturating_sub(1)
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.archive_table_state.select(Some(i));
+    }
+
+    // --- Directory Methods ---
+    pub fn toggle_dir_tab(&mut self) {
+        self.dir_tab = match self.dir_tab {
+            DirectoryTab::Staff => DirectoryTab::Crm,
+            DirectoryTab::Crm => DirectoryTab::Staff,
+        };
+        self.dir_table_state.select(Some(0));
+        self.clear_dir_form();
+    }
+
+    pub fn scroll_dir_down(&mut self) {
+        let max = if self.dir_tab == DirectoryTab::Staff {
+            self.staff_data.len()
+        } else {
+            self.crm_data.len()
+        };
+        let i = match self.dir_table_state.selected() {
+            Some(i) => {
+                if i >= max.saturating_sub(1) {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.dir_table_state.select(Some(i));
+    }
+
+    pub fn scroll_dir_up(&mut self) {
+        let max = if self.dir_tab == DirectoryTab::Staff {
+            self.staff_data.len()
+        } else {
+            self.crm_data.len()
+        };
+        let i = match self.dir_table_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    max.saturating_sub(1)
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.dir_table_state.select(Some(i));
+    }
+
+    pub fn clear_dir_form(&mut self) {
+        self.dir_edit_id = None;
+        self.dir_name.reset();
+        self.dir_comp_dept.reset();
+        self.dir_type_role.reset();
+        self.dir_email.reset();
+        self.dir_phone.reset();
+        self.dir_focus = DirectoryFocus::Name;
+        self.dir_status_message = format!(
+            "Ready to add new {}.",
+            if self.dir_tab == DirectoryTab::Staff {
+                "Staff"
+            } else {
+                "Contact"
+            }
+        );
+    }
+
+    pub fn load_selected_dir(&mut self) {
+        if let Some(i) = self.dir_table_state.selected() {
+            if self.dir_tab == DirectoryTab::Staff {
+                if let Some(s) = self.staff_data.get(i) {
+                    self.dir_edit_id = Some(s.id.clone());
+                    self.dir_name = Input::default().with_value(s.name.clone().unwrap_or_default());
+                    self.dir_comp_dept =
+                        Input::default().with_value(s.department.clone().unwrap_or_default());
+                    self.dir_type_role =
+                        Input::default().with_value(s.designation.clone().unwrap_or_default());
+                    self.dir_email =
+                        Input::default().with_value(s.email.clone().unwrap_or_default());
+                    self.dir_phone =
+                        Input::default().with_value(s.phone.clone().unwrap_or_default());
+                    self.dir_status_message =
+                        format!("EDITING STAFF: {}", s.name.as_deref().unwrap_or(""));
+                }
+            } else {
+                if let Some(c) = self.crm_data.get(i) {
+                    self.dir_edit_id = Some(c.id.clone());
+                    self.dir_name = Input::default().with_value(c.name.clone().unwrap_or_default());
+                    self.dir_comp_dept =
+                        Input::default().with_value(c.company.clone().unwrap_or_default());
+                    self.dir_type_role =
+                        Input::default().with_value(c.contact_type.clone().unwrap_or_default());
+                    self.dir_email =
+                        Input::default().with_value(c.email.clone().unwrap_or_default());
+                    self.dir_phone =
+                        Input::default().with_value(c.phone.clone().unwrap_or_default());
+                    self.dir_status_message =
+                        format!("EDITING CONTACT: {}", c.name.as_deref().unwrap_or(""));
+                }
+            }
+            self.dir_focus = DirectoryFocus::Name;
+        }
+    }
+
+    pub async fn delete_selected_dir(&mut self) {
+        if let Some(i) = self.dir_table_state.selected() {
+            if self.dir_tab == DirectoryTab::Staff {
+                if let Some(s) = self.staff_data.get(i).cloned() {
+                    let _ = sqlx::query("DELETE FROM org_staff WHERE id = ?")
+                        .bind(&s.id)
+                        .execute(&self.db_pool)
+                        .await;
+                    self.dir_status_message =
+                        format!("DELETED STAFF: {}", s.name.as_deref().unwrap_or(""));
+                }
+            } else {
+                if let Some(c) = self.crm_data.get(i).cloned() {
+                    let _ = sqlx::query("DELETE FROM crm_contacts WHERE id = ?")
+                        .bind(&c.id)
+                        .execute(&self.db_pool)
+                        .await;
+                    self.dir_status_message =
+                        format!("DELETED CONTACT: {}", c.name.as_deref().unwrap_or(""));
+                }
+            }
+            self.refresh_data().await;
+        }
+    }
+
+    pub async fn submit_dir(&mut self) {
+        let name = self.dir_name.value().trim().to_string();
+        let comp_dept = self.dir_comp_dept.value().trim().to_string();
+        let type_role = self.dir_type_role.value().trim().to_string();
+        let email = self.dir_email.value().trim().to_string();
+        let phone = self.dir_phone.value().trim().to_string();
+
+        if name.is_empty() {
+            self.dir_status_message = "ERROR: Name is required.".to_string();
+            return;
+        }
+
+        let id = self
+            .dir_edit_id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let now = Local::now().timestamp_millis();
+
+        if self.dir_tab == DirectoryTab::Staff {
+            let q = "INSERT OR REPLACE INTO org_staff (id, name, department, designation, email, phone, createdAt, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'Active')";
+            let _ = sqlx::query(q)
+                .bind(&id)
+                .bind(&name)
+                .bind(&comp_dept)
+                .bind(&type_role)
+                .bind(&email)
+                .bind(&phone)
+                .bind(now)
+                .execute(&self.db_pool)
+                .await;
+        } else {
+            let q = "INSERT OR REPLACE INTO crm_contacts (id, name, company, type, email, phone, createdAt, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'Active')";
+            let _ = sqlx::query(q)
+                .bind(&id)
+                .bind(&name)
+                .bind(&comp_dept)
+                .bind(&type_role)
+                .bind(&email)
+                .bind(&phone)
+                .bind(now)
+                .execute(&self.db_pool)
+                .await;
+        }
+
+        self.dir_status_message = format!("SUCCESS: Saved record for {}", name);
+        self.clear_dir_form();
+        self.refresh_data().await;
+    }
+
+    // --- Resources Methods ---
     pub fn scroll_table_down(&mut self) {
         let i = match self.res_table_state.selected() {
             Some(i) => {
@@ -300,6 +570,170 @@ impl App {
         self.res_table_state.select(Some(i));
     }
 
+    pub fn clear_resource_form(&mut self) {
+        self.res_edit_id = None;
+        self.res_code.reset();
+        self.res_desc.reset();
+        self.res_unit = Input::default().with_value("nos".to_string());
+        self.res_rate.reset();
+        self.res_focus = ResourceFocus::Code;
+        self.res_status_message = "Form cleared.".to_string();
+    }
+
+    pub fn load_selected_resource(&mut self) {
+        if let Some(i) = self.res_table_state.selected() {
+            if let Some(res) = self.resources_data.get(i) {
+                self.res_edit_id = Some(res.id.clone());
+                self.res_code = Input::default().with_value(res.code.clone().unwrap_or_default());
+                self.res_desc =
+                    Input::default().with_value(res.description.clone().unwrap_or_default());
+                self.res_unit = Input::default().with_value(res.unit.clone().unwrap_or_default());
+
+                let mut rate_display = String::new();
+                if let Some(rates_json) = &res.rates {
+                    if let Ok(parsed) =
+                        serde_json::from_str::<serde_json::Map<String, Value>>(rates_json)
+                    {
+                        let entries: Vec<String> = parsed
+                            .iter()
+                            .map(|(k, v)| {
+                                let val = v.as_f64().unwrap_or_else(|| {
+                                    v.as_str()
+                                        .and_then(|s| s.parse::<f64>().ok())
+                                        .unwrap_or(0.0)
+                                });
+                                if (k == "base" || k == "Base") && parsed.len() == 1 {
+                                    format!("{}", val)
+                                } else {
+                                    format!("{}:{}", k, val)
+                                }
+                            })
+                            .collect();
+                        rate_display = entries.join(", ");
+                    }
+                }
+                self.res_rate = Input::default().with_value(rate_display);
+                self.res_status_message =
+                    format!("EDITING: {}", res.code.as_deref().unwrap_or("Item"));
+                self.res_focus = ResourceFocus::Code;
+            }
+        }
+    }
+
+    pub async fn submit_resource(&mut self) {
+        let code = self.res_code.value().trim().to_string();
+        let desc = self.res_desc.value().trim().to_string();
+        let unit = self.res_unit.value().trim().to_string();
+        let rate_str = self.res_rate.value().trim().to_string();
+
+        if code.is_empty() || desc.is_empty() || rate_str.is_empty() {
+            self.res_status_message = "ERROR: Required fields missing.".into();
+            return;
+        }
+
+        let mut rates_map = serde_json::Map::new();
+        if rate_str.contains(':') {
+            for pair in rate_str.split(',') {
+                let parts: Vec<&str> = pair.split(':').collect();
+                if parts.len() == 2 {
+                    if let Ok(val) = parts[1].trim().parse::<f64>() {
+                        rates_map.insert(parts[0].trim().to_string(), serde_json::json!(val));
+                    }
+                }
+            }
+        } else if let Ok(val) = rate_str.parse::<f64>() {
+            rates_map.insert("base".to_string(), serde_json::json!(val));
+        }
+
+        let rates_json = serde_json::to_string(&rates_map).unwrap_or_else(|_| "{}".to_string());
+        let id = self
+            .res_edit_id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+        let q = "INSERT OR REPLACE INTO resources (id, code, description, unit, rates, rateHistory) VALUES (?, ?, ?, ?, ?, '[]')";
+        let _ = sqlx::query(q)
+            .bind(&id)
+            .bind(&code)
+            .bind(&desc)
+            .bind(&unit)
+            .bind(&rates_json)
+            .execute(&self.db_pool)
+            .await;
+
+        self.res_status_message = format!("SUCCESS: Resource '{}' saved.", code);
+        self.clear_resource_form();
+        self.refresh_data().await;
+    }
+
+    pub async fn delete_selected_resource(&mut self) {
+        if let Some(i) = self.res_table_state.selected() {
+            if let Some(res) = self.resources_data.get(i).cloned() {
+                let _ = sqlx::query("DELETE FROM resources WHERE id = ?")
+                    .bind(&res.id)
+                    .execute(&self.db_pool)
+                    .await;
+                self.res_status_message = format!("DELETED: {}", res.code.as_deref().unwrap_or(""));
+                self.refresh_data().await;
+            }
+        }
+    }
+
+    // --- Region Methods ---
+    pub fn scroll_region_down(&mut self) {
+        let i = match self.region_table_state.selected() {
+            Some(i) => {
+                if i >= self.regions_data.len().saturating_sub(1) {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.region_table_state.select(Some(i));
+    }
+    pub fn scroll_region_up(&mut self) {
+        let i = match self.region_table_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.regions_data.len().saturating_sub(1)
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.region_table_state.select(Some(i));
+    }
+
+    pub async fn submit_region(&mut self) {
+        let name = self.region_input.value().trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let _ = sqlx::query("INSERT INTO regions (id, name) VALUES (?, ?)")
+            .bind(Uuid::new_v4().to_string())
+            .bind(&name)
+            .execute(&self.db_pool)
+            .await;
+        self.region_input.reset();
+        self.refresh_data().await;
+    }
+
+    pub async fn delete_selected_region(&mut self) {
+        if let Some(i) = self.region_table_state.selected() {
+            if let Some(reg) = self.regions_data.get(i).cloned() {
+                let _ = sqlx::query("DELETE FROM regions WHERE id = ?")
+                    .bind(&reg.id)
+                    .execute(&self.db_pool)
+                    .await;
+                self.refresh_data().await;
+            }
+        }
+    }
+
+    // --- Databook Methods ---
     pub fn scroll_dbk_down(&mut self) {
         let i = match self.dbk_table_state.selected() {
             Some(i) => {
@@ -473,171 +907,7 @@ impl App {
         self.refresh_data().await;
     }
 
-    // --- FULLY IMPLEMENTED RESOURCE & REGION METHODS ---
-    pub fn clear_resource_form(&mut self) {
-        self.res_edit_id = None;
-        self.res_code.reset();
-        self.res_desc.reset();
-        self.res_unit = Input::default().with_value("nos".to_string());
-        self.res_rate.reset();
-        self.res_focus = ResourceFocus::Code;
-        self.res_status_message = "Form cleared.".to_string();
-    }
-
-    pub fn load_selected_resource(&mut self) {
-        if let Some(i) = self.res_table_state.selected() {
-            if let Some(res) = self.resources_data.get(i) {
-                self.res_edit_id = Some(res.id.clone());
-                self.res_code = Input::default().with_value(res.code.clone().unwrap_or_default());
-                self.res_desc =
-                    Input::default().with_value(res.description.clone().unwrap_or_default());
-                self.res_unit = Input::default().with_value(res.unit.clone().unwrap_or_default());
-
-                let mut rate_display = String::new();
-                if let Some(rates_json) = &res.rates {
-                    if let Ok(parsed) =
-                        serde_json::from_str::<serde_json::Map<String, Value>>(rates_json)
-                    {
-                        let entries: Vec<String> = parsed
-                            .iter()
-                            .map(|(k, v)| {
-                                let val = v.as_f64().unwrap_or_else(|| {
-                                    v.as_str()
-                                        .and_then(|s| s.parse::<f64>().ok())
-                                        .unwrap_or(0.0)
-                                });
-                                if (k == "base" || k == "Base") && parsed.len() == 1 {
-                                    format!("{}", val)
-                                } else {
-                                    format!("{}:{}", k, val)
-                                }
-                            })
-                            .collect();
-                        rate_display = entries.join(", ");
-                    }
-                }
-                self.res_rate = Input::default().with_value(rate_display);
-                self.res_status_message =
-                    format!("EDITING: {}", res.code.as_deref().unwrap_or("Item"));
-                self.res_focus = ResourceFocus::Code;
-            }
-        }
-    }
-
-    pub async fn submit_resource(&mut self) {
-        let code = self.res_code.value().trim().to_string();
-        let desc = self.res_desc.value().trim().to_string();
-        let unit = self.res_unit.value().trim().to_string();
-        let rate_str = self.res_rate.value().trim().to_string();
-
-        if code.is_empty() || desc.is_empty() || rate_str.is_empty() {
-            self.res_status_message = "ERROR: Required fields missing.".into();
-            return;
-        }
-
-        let mut rates_map = serde_json::Map::new();
-        if rate_str.contains(':') {
-            for pair in rate_str.split(',') {
-                let parts: Vec<&str> = pair.split(':').collect();
-                if parts.len() == 2 {
-                    if let Ok(val) = parts[1].trim().parse::<f64>() {
-                        rates_map.insert(parts[0].trim().to_string(), serde_json::json!(val));
-                    }
-                }
-            }
-        } else if let Ok(val) = rate_str.parse::<f64>() {
-            rates_map.insert("base".to_string(), serde_json::json!(val));
-        }
-
-        let rates_json = serde_json::to_string(&rates_map).unwrap_or_else(|_| "{}".to_string());
-        let id = self
-            .res_edit_id
-            .clone()
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-        let q = "INSERT OR REPLACE INTO resources (id, code, description, unit, rates, rateHistory) VALUES (?, ?, ?, ?, ?, '[]')";
-        let _ = sqlx::query(q)
-            .bind(&id)
-            .bind(&code)
-            .bind(&desc)
-            .bind(&unit)
-            .bind(&rates_json)
-            .execute(&self.db_pool)
-            .await;
-
-        self.res_status_message = format!("SUCCESS: Resource '{}' saved.", code);
-        self.clear_resource_form();
-        self.refresh_data().await;
-    }
-
-    pub async fn delete_selected_resource(&mut self) {
-        if let Some(i) = self.res_table_state.selected() {
-            if let Some(res) = self.resources_data.get(i).cloned() {
-                let _ = sqlx::query("DELETE FROM resources WHERE id = ?")
-                    .bind(&res.id)
-                    .execute(&self.db_pool)
-                    .await;
-                self.res_status_message = format!("DELETED: {}", res.code.as_deref().unwrap_or(""));
-                self.refresh_data().await;
-            }
-        }
-    }
-
-    pub async fn submit_region(&mut self) {
-        let name = self.region_input.value().trim().to_string();
-        if name.is_empty() {
-            return;
-        }
-        let _ = sqlx::query("INSERT INTO regions (id, name) VALUES (?, ?)")
-            .bind(Uuid::new_v4().to_string())
-            .bind(&name)
-            .execute(&self.db_pool)
-            .await;
-        self.region_input.reset();
-        self.refresh_data().await;
-    }
-
-    pub async fn delete_selected_region(&mut self) {
-        if let Some(i) = self.region_table_state.selected() {
-            if let Some(reg) = self.regions_data.get(i).cloned() {
-                let _ = sqlx::query("DELETE FROM regions WHERE id = ?")
-                    .bind(&reg.id)
-                    .execute(&self.db_pool)
-                    .await;
-                self.refresh_data().await;
-            }
-        }
-    }
-
-    pub fn scroll_region_down(&mut self) {
-        let i = match self.region_table_state.selected() {
-            Some(i) => {
-                if i >= self.regions_data.len().saturating_sub(1) {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
-        };
-        self.region_table_state.select(Some(i));
-    }
-
-    pub fn scroll_region_up(&mut self) {
-        let i = match self.region_table_state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.regions_data.len().saturating_sub(1)
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-        self.region_table_state.select(Some(i));
-    }
-
-    // --- FULLY IMPLEMENTED SERVER METHODS ---
+    // --- SERVER METHODS ---
     pub async fn apply_server_config(&mut self) {
         let port = self.server_port_input.value();
         self.server_logs.push(format!(
@@ -656,35 +926,36 @@ impl App {
     }
 
     pub async fn start_server(&mut self) {
-        let port = self
-            .server_port_input
-            .value()
-            .trim()
-            .parse::<u16>()
-            .unwrap_or(3000);
+        let port_val = self.server_port_input.value().trim();
+        // 🔥 If they leave the port blank, we pass 0 so the daemon finds a free one!
+        let port = if port_val.is_empty() {
+            0
+        } else {
+            port_val.parse::<u16>().unwrap_or(0)
+        };
         let config = serde_json::json!({ "port": port });
 
         let config_path = get_openprix_dir().join(".daemon_config.json");
         let _ = std::fs::write(config_path, config.to_string());
 
         let exe_path = std::env::current_exe().unwrap_or_default();
+        // 🔥 FIX: We now look for 'openprix.exe' instead of 'daemon.exe'
         let daemon_path = exe_path.with_file_name(if cfg!(windows) {
-            "daemon.exe"
+            "openprix.exe"
         } else {
-            "daemon"
+            "openprix"
         });
 
         match std::process::Command::new(&daemon_path).spawn() {
             Ok(_) => {
                 self.server_logs.push(format!(
-                    "[{}] START: Spawned daemon on port {}.",
-                    Local::now().format("%H:%M:%S"),
-                    port
+                    "[{}] START: Spawned daemon. Awaiting assigned port...",
+                    Local::now().format("%H:%M:%S")
                 ));
             }
             Err(e) => {
                 self.server_logs.push(format!(
-                    "[{}] ERROR: Failed to launch daemon: {}",
+                    "[{}] ERROR: Failed to launch openprix executable: {}",
                     Local::now().format("%H:%M:%S"),
                     e
                 ));
@@ -708,7 +979,6 @@ impl App {
             let kill_cmd = std::process::Command::new("taskkill")
                 .args(["/PID", &d.pid.to_string(), "/F"])
                 .output();
-
             #[cfg(not(target_os = "windows"))]
             let kill_cmd = std::process::Command::new("kill")
                 .args(["-9", &d.pid.to_string()])
@@ -717,7 +987,6 @@ impl App {
             match kill_cmd {
                 Ok(output) => {
                     let err_str = String::from_utf8_lossy(&output.stderr);
-
                     if output.status.success() {
                         self.server_logs.push(format!(
                             "[{}] SUCCESS: Terminated PID {}.",
@@ -727,7 +996,6 @@ impl App {
                     } else if err_str.to_lowercase().contains("not found")
                         || err_str.to_lowercase().contains("no such process")
                     {
-                        // 🔥 FIX: The process is already dead! Log it, but don't treat it as a fatal error.
                         self.server_logs.push(format!(
                             "[{}] INFO: Process {} was already dead.",
                             Local::now().format("%H:%M:%S"),
@@ -741,7 +1009,6 @@ impl App {
                         ));
                     }
 
-                    // 🔥 FIX: ALWAYS clean up the stale status file and reset the UI!
                     let status_path = get_openprix_dir().join(".daemon_status.json");
                     let _ = std::fs::remove_file(status_path);
                     self.daemon_raw = None;

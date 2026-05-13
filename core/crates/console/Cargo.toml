@@ -1,7 +1,10 @@
 [package]
-name = "console"
-version = "0.1.0"
+name = "openprix-tui"
+version = "2.0.0"
 edition = "2024"
+authors = ["GOKUL DC <gokuldc93@gmail.com>"]
+description = "OpenPrix Core: High-performance Engineering ERP & Server Daemon"
+homepage = "https://github.com/gokuldc/openprix"
 
 [dependencies]
 # The UI Framework
@@ -18,3 +21,7 @@ tokio = { version = "1.52.2", features = ["full"] }
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls"] }
 uuid = { version = "1.23.1", features = ["v4"] }
 chrono = "0.4.44"
+
+[[bin]]
+name = "openprix-tui"
+path = "src/main.rs"

@@ -1,7 +1,7 @@
 {
-  "name": "openprix",
+  "name": "openprix-client",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.0-RC1",
   "description": "The Operating System for Modern Engineering & Construction Firms.",
   "author": "Gokul DC",
   "type": "module",
@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "electron:start": "electron . --disable-gpu --disable-gpu-compositing",
+    "electron:start": "electron .",
     "dev:electron": "cross-env NODE_ENV=development concurrently -k \"npm run dev\" \"wait-on http://127.0.0.1:5173 && npm run electron:start\"",
     "build:electron": "npm run build && electron-builder"
   },
@@ -27,7 +27,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
+      "createDesktopShortcut": true,
+      "license": "LICENSE"
     },
     "files": [
       "dist/**/*",

@@ -1,19 +1,18 @@
+pub mod archive;
 pub mod dashboard;
 pub mod databook;
+pub mod directory;
 pub mod resources;
-pub mod server;
 
+use crate::app::{App, Page};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, Paragraph, Tabs},
 };
 
-use crate::app::{App, Page};
-
-// 🔥 THE FIX: Changed `&App` to `&mut App`
 pub fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -28,11 +27,10 @@ pub fn ui(f: &mut Frame, app: &mut App) {
 
     match app.active_page {
         Page::Dashboard => dashboard::render(f, app, chunks[1]),
-        Page::Resources => resources::render(f, app, chunks[1]), // Now safely receives &mut App
+        Page::Resources => resources::render(f, app, chunks[1]),
         Page::Databook => databook::render(f, app, chunks[1]),
-        Page::ProjectArchive => render_placeholder(f, " PROJECT ARCHIVE (PRESS TAB) ", chunks[1]),
-        Page::Directory => render_placeholder(f, " ORG & CRM DIRECTORY (PRESS TAB) ", chunks[1]),
-        Page::ServerManager => server::render(f, app, chunks[1]),
+        Page::ProjectArchive => archive::render(f, app, chunks[1]),
+        Page::Directory => directory::render(f, app, chunks[1]),
     }
 
     render_footer(f, app, chunks[2]);
@@ -45,7 +43,6 @@ fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
         " 3.DATABOOK ",
         " 4.ARCHIVE ",
         " 5.DIRECTORY ",
-        " 6.SERVER ",
     ]
     .into_iter()
     .map(Line::from)
@@ -57,14 +54,13 @@ fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
         Page::Databook => 2,
         Page::ProjectArchive => 3,
         Page::Directory => 4,
-        Page::ServerManager => 5,
     };
 
     let tabs = Tabs::new(titles)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" // OPENPRIX_CORE_NEXUS "),
+                .title(" // OPENPRIX_TERMINAL "),
         )
         .highlight_style(
             Style::default()
@@ -78,20 +74,9 @@ fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(tabs, area);
 }
 
-fn render_placeholder(f: &mut Frame, title: &str, area: Rect) {
-    let p = Paragraph::new(format!(
-        "\n\n{} under construction.\n\nUse [TAB] to navigate.",
-        title
-    ))
-    .block(Block::default().title(title).borders(Borders::ALL))
-    .alignment(Alignment::Center)
-    .style(Style::default().fg(Color::DarkGray));
-    f.render_widget(p, area);
-}
-
 fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     let footer_text = format!(
-        " [TAB/RIGHT] Next | [LEFT] Prev | [F5] Refresh | [ESC] Quit  ||  {}",
+        " [RIGHT] Next | [LEFT] Prev | [F5] Refresh | [ESC] Quit  ||  {}",
         app.daemon_status_text
     );
     let footer =

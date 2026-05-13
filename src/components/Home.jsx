@@ -173,7 +173,7 @@ export default function Home() {
                             <Box component="img" src={brandLogo} sx={{ height: 50, maxWidth: 400, objectFit: 'contain' }} />
                         ) : (
                             <Typography variant="h4" fontWeight="bold" color="primary.main" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px' }}>
-                                {brandName ? brandName.toUpperCase() : "// OPENPRIX_CORE_NEXUS"}
+                                {brandName ? brandName.toUpperCase() : "// OPENPRIX_NEXUS"}
                             </Typography>
                         )}
                     </Box>

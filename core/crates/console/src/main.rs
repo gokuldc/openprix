@@ -1,8 +1,8 @@
 mod app;
 mod ui;
 
-use app::{App, DatabookFocus, Page, ResourceFocus, ServerFocus};
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use app::{App, DatabookFocus, DirectoryFocus, Page, ResourceFocus, ServerFocus};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::time::Duration;
 use tui_input::backend::crossterm::EventHandler;
 
@@ -21,9 +21,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    // --- Form Input Handling for Resources Page ---
+                    // --- Dashboard & Server Input Handling ---
+                    if app.active_page == Page::Dashboard {
+                        match key.code {
+                            KeyCode::Down | KeyCode::Tab => {
+                                app.server_focus = match app.server_focus {
+                                    ServerFocus::PortInput => ServerFocus::StartStop,
+                                    ServerFocus::StartStop => ServerFocus::TrafficTable,
+                                    ServerFocus::TrafficTable => ServerFocus::LogArea,
+                                    ServerFocus::LogArea => ServerFocus::PortInput,
+                                };
+                                continue;
+                            }
+                            KeyCode::Up | KeyCode::BackTab => {
+                                app.server_focus = match app.server_focus {
+                                    ServerFocus::PortInput => ServerFocus::LogArea,
+                                    ServerFocus::StartStop => ServerFocus::PortInput,
+                                    ServerFocus::TrafficTable => ServerFocus::StartStop,
+                                    ServerFocus::LogArea => ServerFocus::TrafficTable,
+                                };
+                                continue;
+                            }
+                            KeyCode::Enter if app.server_focus == ServerFocus::PortInput => {
+                                app.apply_server_config().await;
+                                continue;
+                            }
+                            KeyCode::Enter if app.server_focus == ServerFocus::StartStop => {
+                                app.toggle_server().await;
+                                continue;
+                            }
+                            _ => {}
+                        }
+
+                        if app.server_focus == ServerFocus::PortInput {
+                            app.server_port_input.handle_event(&Event::Key(key));
+                            continue;
+                        }
+                    }
+
+                    // --- Resources Page ---
                     if app.active_page == Page::Resources {
-                        // Intercept inputs for the Region Manager if it's open
                         if app.show_region_manager {
                             match key.code {
                                 KeyCode::Esc | KeyCode::F(6) => {
@@ -53,7 +90,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
 
-                        // Otherwise, route inputs to the main Resources form
                         match key.code {
                             KeyCode::PageDown => {
                                 app.scroll_table_down();
@@ -80,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 continue;
                             }
 
-                            KeyCode::Up => {
+                            KeyCode::Up | KeyCode::BackTab => {
                                 app.res_focus = match app.res_focus {
                                     ResourceFocus::Code => ResourceFocus::Submit,
                                     ResourceFocus::Description => ResourceFocus::Code,
@@ -90,7 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 };
                                 continue;
                             }
-                            KeyCode::Down | KeyCode::Enter => {
+                            KeyCode::Down | KeyCode::Tab | KeyCode::Enter => {
                                 if key.code == KeyCode::Enter
                                     && app.res_focus == ResourceFocus::Submit
                                 {
@@ -126,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
 
-                    // --- Databook Input Handling ---
+                    // --- Databook Page ---
                     if app.active_page == Page::Databook {
                         match key.code {
                             KeyCode::PageDown => {
@@ -151,7 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 continue;
                             }
 
-                            KeyCode::Up => {
+                            KeyCode::Up | KeyCode::BackTab => {
                                 app.dbk_focus = match app.dbk_focus {
                                     DatabookFocus::Code => DatabookFocus::Submit,
                                     DatabookFocus::Description => DatabookFocus::Code,
@@ -162,7 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 };
                                 continue;
                             }
-                            KeyCode::Down | KeyCode::Enter => {
+                            KeyCode::Down | KeyCode::Tab | KeyCode::Enter => {
                                 if key.code == KeyCode::Enter
                                     && app.dbk_focus == DatabookFocus::Submit
                                 {
@@ -202,49 +238,110 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
 
-                    // --- Server Page Routing ---
-                    if app.active_page == Page::ServerManager {
+                    // --- Directory Page ---
+                    if app.active_page == Page::Directory {
+                        if key.code == KeyCode::F(6)
+                            || (key.modifiers.contains(KeyModifiers::CONTROL)
+                                && key.code == KeyCode::Char('t'))
+                        {
+                            app.toggle_dir_tab();
+                            continue;
+                        }
+
                         match key.code {
-                            KeyCode::Down => {
-                                app.server_focus = match app.server_focus {
-                                    ServerFocus::PortInput => ServerFocus::StartStop,
-                                    ServerFocus::StartStop => ServerFocus::TrafficTable,
-                                    ServerFocus::TrafficTable => ServerFocus::LogArea,
-                                    ServerFocus::LogArea => ServerFocus::PortInput,
+                            KeyCode::PageDown => {
+                                app.scroll_dir_down();
+                                continue;
+                            }
+                            KeyCode::PageUp => {
+                                app.scroll_dir_up();
+                                continue;
+                            }
+
+                            KeyCode::F(2) => {
+                                app.load_selected_dir();
+                                continue;
+                            }
+                            KeyCode::F(3) => {
+                                app.clear_dir_form();
+                                continue;
+                            }
+                            KeyCode::F(4) => {
+                                app.delete_selected_dir().await;
+                                continue;
+                            }
+
+                            KeyCode::Up | KeyCode::BackTab => {
+                                app.dir_focus = match app.dir_focus {
+                                    DirectoryFocus::Name => DirectoryFocus::Submit,
+                                    DirectoryFocus::CompDept => DirectoryFocus::Name,
+                                    DirectoryFocus::TypeRole => DirectoryFocus::CompDept,
+                                    DirectoryFocus::Email => DirectoryFocus::TypeRole,
+                                    DirectoryFocus::Phone => DirectoryFocus::Email,
+                                    DirectoryFocus::Submit => DirectoryFocus::Phone,
                                 };
                                 continue;
                             }
-                            KeyCode::Up => {
-                                app.server_focus = match app.server_focus {
-                                    ServerFocus::PortInput => ServerFocus::LogArea,
-                                    ServerFocus::StartStop => ServerFocus::PortInput,
-                                    ServerFocus::TrafficTable => ServerFocus::StartStop,
-                                    ServerFocus::LogArea => ServerFocus::TrafficTable,
+                            KeyCode::Down | KeyCode::Tab | KeyCode::Enter => {
+                                if key.code == KeyCode::Enter
+                                    && app.dir_focus == DirectoryFocus::Submit
+                                {
+                                    app.submit_dir().await;
+                                    continue;
+                                }
+                                app.dir_focus = match app.dir_focus {
+                                    DirectoryFocus::Name => DirectoryFocus::CompDept,
+                                    DirectoryFocus::CompDept => DirectoryFocus::TypeRole,
+                                    DirectoryFocus::TypeRole => DirectoryFocus::Email,
+                                    DirectoryFocus::Email => DirectoryFocus::Phone,
+                                    DirectoryFocus::Phone => DirectoryFocus::Submit,
+                                    DirectoryFocus::Submit => DirectoryFocus::Name,
                                 };
-                                continue;
-                            }
-                            KeyCode::Enter if app.server_focus == ServerFocus::PortInput => {
-                                app.apply_server_config().await;
-                                continue;
-                            }
-                            KeyCode::Enter if app.server_focus == ServerFocus::StartStop => {
-                                app.toggle_server().await;
                                 continue;
                             }
                             _ => {}
                         }
 
-                        if app.server_focus == ServerFocus::PortInput {
-                            app.server_port_input.handle_event(&Event::Key(key));
-                            continue;
+                        match app.dir_focus {
+                            DirectoryFocus::Name => {
+                                app.dir_name.handle_event(&Event::Key(key));
+                            }
+                            DirectoryFocus::CompDept => {
+                                app.dir_comp_dept.handle_event(&Event::Key(key));
+                            }
+                            DirectoryFocus::TypeRole => {
+                                app.dir_type_role.handle_event(&Event::Key(key));
+                            }
+                            DirectoryFocus::Email => {
+                                app.dir_email.handle_event(&Event::Key(key));
+                            }
+                            DirectoryFocus::Phone => {
+                                app.dir_phone.handle_event(&Event::Key(key));
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // 🔥 NEW: Archive Page Input Handling
+                    if app.active_page == Page::ProjectArchive {
+                        match key.code {
+                            KeyCode::Down | KeyCode::PageDown => {
+                                app.scroll_archive_down();
+                                continue;
+                            }
+                            KeyCode::Up | KeyCode::PageUp => {
+                                app.scroll_archive_up();
+                                continue;
+                            }
+                            _ => {}
                         }
                     }
 
                     // --- Global Navigation ---
                     match key.code {
                         KeyCode::Esc => app.should_quit = true,
-                        KeyCode::Right | KeyCode::Tab => app.next_page(),
-                        KeyCode::Left | KeyCode::BackTab => app.previous_page(),
+                        KeyCode::Right => app.next_page(),
+                        KeyCode::Left => app.previous_page(),
                         KeyCode::F(5) => app.refresh_data().await,
                         _ => {}
                     }

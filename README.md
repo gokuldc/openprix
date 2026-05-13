@@ -1,63 +1,147 @@
-# 🛸 OPENPRIX
-**The Operating System for Modern Engineering & Construction Firms.**
-OPENPRIX is a high-performance project management ecosystem built for engineering firms that need local speed with network flexibility. It bridges the gap between a robust Electron Desktop App and a Localized Web Server, allowing teams to sync tasks, logs, and communications across an office network without relying on slow, expensive cloud subscriptions.
-## 💎 The Ghost Architecture
-OPENPRIX is designed around a **Local-First** philosophy. Data lives in a high-speed SQLite engine on your host machine, while an integrated Express server provides real-time access to mobile devices and browsers on the same network.
-## 🛠 Core Modules
-### 🏗️ Site & Project Operations
- * **Site Management:** Real-time oversight of field operations, progress tracking, and daily site diary integration.
- * **M-Book (Measurement Book):** Digitalized engineering measurement records for civil works, ensuring audit-ready compliance and accuracy.
- * **Kanban Task Engine:** Automated aggregation of ganttTasks into a visual flow (Backlog, Procurement, Progress, QC, Done).
- * **File Versioning:** Integrated document control system for blueprints and CAD files, preventing "outdated drawing" errors on-site.
-### 💰 Financials & Procurement
- * **Estimation Engine:** High-speed calculation of project tenders and internal cost-to-complete projections.
- * **RA (Running Account) Billing:** Automated generation and tracking of progress-based invoices for clients and subcontractors.
- * **Supply Chain Management (SCM):** End-to-end procurement tracking from requisition to site delivery.
- * **One-Click Purchase Order (PO):** Convert approved estimations directly into vendor POs with a single trigger.
- * **Inventory Management:** Real-time stock tracking across multiple store locations with low-stock alerts.
-### 👥 Resource & Org Management
- * **Resource Management:** Dynamic allocation of workforce and heavy machinery across active project sites.
- * **CRM:** Lead tracking and client relationship management tailored for engineering contract cycles.
- * **Organization Management:** Structural control of departments, and complex RBAC (Role-Based Access Control).
-### 💬 Commlink (Unified Chat)
- * **Channels & Chat:** WhatsApp-style threaded conversations and Discord-style mentions.
-## 🚀 Installation & Setup
-### Prerequisites
- * Node.js (LTS recommended)
- * npm or yarn
-### Deployment
- 1. **Clone the Repository:**
-   ```bash
-   git clone https://github.com/gokuldc/openprix.git
-   cd openprix
-   
-   ```
- 2. **Install Dependencies:**
-   ```bash
-   npm install
-   
-   ```
- 3. **Run in Development Mode:**
-   ```bash
-   npm run dev
-   
-   ```
- 4. **Build Production Executables:**
-   ```bash
-   npm run build
-   
-   ```
-### 🔑 Default Credentials
-Upon first launch, use the following credentials to access the administrative dashboard:
-> **Username:** admin
-> **Password:** admin123
-> 
-*Note: For security, navigate to Organization Management to update your password immediately after first login.*
-## 🛡 Security & Networking
- * **Preload Isolation:** Core database commands are mediated through a secure IPC bridge.
- * **Network Server Mode:** Enable the "Web Bridge" to allow local Wi-Fi/LAN devices to access the dashboard via http://[Your-IP]:3000.
- * **Clearance Levels:** Five levels of administrative clearance to protect sensitive financial and M-Book data.
-## 📝 License & Copyright
-Built for internal use at engineering firms. Standard MIT license applies to the open-source core.
-**© 2026 gokuldc. All rights reserved.**
-*Engineer's Note: "Data is the new concrete. Build it solid, or the project won't stand."* 🏗️
+# // OPENPRIX
+High-performance Engineering ERP & Server Daemon. OpenPrix is built with a highly decoupled, enterprise-grade architecture featuring a Rust-based backend, an embedded React web application, a native Terminal User Interface (TUI), and a dedicated Electron thin-client.
+
+## 🏗️ Architecture Overview
+* **The Server (`openprix`)**: A multi-threaded Rust (Axum) daemon with an embedded SQLite database. It serves the REST API and *directly embeds* the compiled React web application inside the binary using `rust-embed`.
+* **The Console (`openprix-tui`)**: A native Rust (Ratatui) terminal dashboard for server monitoring and quick kanban management.
+* **The Web App (`react`)**: A React/Vite frontend. It dynamically discovers the server port and communicates purely over REST.
+* **The Client (`electron`)**: A lightweight native desktop portal that connects to the local (or remote) daemon without carrying the weight of the web build.
+
+---
+
+## 🛠️ Prerequisites
+Before building OpenPrix from source, ensure you have the following installed on your system:
+1. **[Node.js](https://nodejs.org/)** (v18+ recommended)
+2. **[Rust & Cargo](https://rustup.rs/)** (Latest stable version)
+3. *Windows Only:* **[WiX Toolset v3.11](https://wixtoolset.org/releases/)** (Required to build the `.msi` backend installer). Make sure to add the WiX `bin` folder to your System PATH.
+
+---
+
+## 🚀 Building from Source
+
+Because the Rust backend embeds the frontend web files, **you must build the React app first.**
+
+### Step 1: Build the Web App
+```bash
+# From the root directory, install dependencies and build the Vite React app
+npm install
+npm run build
+
+```
+
+*(This generates the `dist/` folder, which the Rust compiler will embed).*
+
+### Step 2: Build the Rust Binaries (Daemon & TUI)
+
+```bash
+cd core
+cargo build --release
+
+```
+
+*(This creates `openprix` and `openprix-tui` inside `core/target/release/`).*
+
+### Step 3: Run the Local Setup Script (Windows Only)
+
+If you aren't creating an installer and just want to run the tools locally, use the provided PowerShell script to add the binaries to your environment variables:
+
+```powershell
+.\setup_env.ps1
+
+```
+
+---
+
+## 📦 Packaging & Installers
+
+### 🪟 Windows (MSI & EXE)
+
+Windows packaging utilizes WiX Toolset for the backend and NSIS for the frontend client.
+
+**1. Build the Backend Installer (.msi)**
+
+```powershell
+cd core
+cargo wix -p openprix
+
+```
+
+*Outputs:* `core/target/wix/openprix.msi`. This installs the daemon, the TUI, and injects them into the System PATH.
+
+**2. Build the Electron Client Installer (.exe)**
+
+```powershell
+# From the root directory
+npm run build:electron
+
+```
+
+*Outputs:* `release-electron/OpenPrix Setup.exe`.
+
+### 🍎 macOS (DMG)
+
+**1. Backend Installation**
+macOS does not use WiX installers. To install the backend system-wide:
+
+```bash
+cd core
+cargo build --release
+# Copy the compiled binaries to your local bin directory
+sudo cp target/release/openprix /usr/local/bin/
+sudo cp target/release/openprix-tui /usr/local/bin/
+
+```
+
+**2. Build the Electron Client (.dmg)**
+
+```bash
+# From the root directory
+npm run build:electron -- --mac
+
+```
+
+### 🐧 Linux (AppImage & Snap)
+
+**1. Backend Installation**
+Similar to macOS, Linux users can easily move the compiled binaries to their local path.
+
+```bash
+cd core
+cargo build --release
+# Move binaries to your user path
+sudo cp target/release/openprix /usr/local/bin/
+sudo cp target/release/openprix-tui /usr/local/bin/
+
+```
+
+**2. Build the Electron Client (.AppImage)**
+
+```bash
+# From the root directory
+npm run build:electron -- --linux
+
+```
+
+---
+
+## 💻 Usage & CLI Commands
+
+Once installed or added to your PATH, OpenPrix acts as a native operating system utility.
+
+| Command | Action |
+| --- | --- |
+| `openprix` | Boots the Background Server on a dynamic secure port. |
+| `openprix-t` | Launches the Terminal Dashboard. |
+
+**Connecting the Client:**
+Open the OpenPrix desktop icon. On the connection screen, the portal will automatically detect your local daemon (usually `http://127.0.0.1:<dynamic_port>`). Click Connect to initialize your secure ERP session.
+
+---
+
+## 📜 License
+
+This project is licensed under the terms of the MIT License.
+
+```
+
+```

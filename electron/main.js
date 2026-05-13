@@ -5,6 +5,7 @@ import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+// We can actually keep the isDev variable in case you need it later for DevTools!
 const isDev = process.env.NODE_ENV === 'development';
 
 let mainWindow;
@@ -21,11 +22,9 @@ function createWindow() {
         }
     });
 
-    if (isDev) {
-        mainWindow.loadURL('http://127.0.0.1:5173');
-    } else {
-        mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
-    }
+    // 🔥 FIX: ALWAYS load the native connection portal first!
+    // No more if/else check. This forces dev mode to behave exactly like production.
+    mainWindow.loadFile(path.join(__dirname, 'connect.html'));
 
     mainWindow.on('close', (event) => {
         if (!app.isQuiting) {
@@ -36,6 +35,7 @@ function createWindow() {
 }
 
 function registerOsHandlers() {
+    // Standard OS Handlers
     ipcMain.handle('os:pick-file', async () => {
         const result = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'] });
         return result.canceled ? null : result.filePaths[0];
@@ -62,6 +62,11 @@ function registerOsHandlers() {
         const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
         return result.canceled ? null : result.filePaths[0];
     });
+
+    // 🔥 NEW: Intercepts the success signal from connect.html and routes the window!
+    ipcMain.on('connect-to-server', (event, targetUrl) => {
+        mainWindow.loadURL(targetUrl);
+    });
 }
 
 app.whenReady().then(() => {
@@ -70,4 +75,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', (e) => { e.preventDefault(); });
-app.on('activate', () => { if (mainWindow === null) createWindow(); else mainWindow.show(); });
+
+app.on('activate', () => {
+    if (mainWindow === null) createWindow();
+    else mainWindow.show();
+});

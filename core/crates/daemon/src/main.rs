@@ -1,9 +1,11 @@
 use axum::{
     Router,
     extract::DefaultBodyLimit,
-    http::Method,
+    http::{Method, StatusCode, Uri, header},
+    response::IntoResponse,
     routing::{delete, get, post, put},
 };
+use rust_embed::RustEmbed;
 use serde_json::Value;
 use shared::DaemonStatus;
 use sqlx::{
@@ -16,7 +18,31 @@ use tower_http::cors::CorsLayer;
 
 mod routes;
 
-// 🔥 NEW: Universal Path Resolver
+#[derive(RustEmbed)]
+#[folder = "../../../dist/"]
+struct Assets;
+
+async fn static_handler(uri: Uri) -> impl IntoResponse {
+    let mut path = uri.path().trim_start_matches('/');
+    if path.is_empty() {
+        path = "index.html";
+    }
+
+    match Assets::get(path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+        }
+        None => {
+            if let Some(index) = Assets::get("index.html") {
+                ([(header::CONTENT_TYPE, "text/html")], index.data).into_response()
+            } else {
+                (StatusCode::NOT_FOUND, "404 Not Found").into_response()
+            }
+        }
+    }
+}
+
 pub fn get_openprix_dir() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
@@ -80,23 +106,53 @@ async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 🔥 FIX: Bind everything to the User Profile directory
+    // 🔥 FIX 1: Command Line Argument Router
+    let args: Vec<String> = std::env::args().collect();
+    if args.contains(&"--t".to_string()) || args.contains(&"-t".to_string()) {
+        let exe_path = std::env::current_exe().unwrap_or_default();
+        let tui_path = exe_path.with_file_name(if cfg!(windows) {
+            "openprix-tui.exe"
+        } else {
+            "openprix-tui"
+        });
+
+        match std::process::Command::new(&tui_path).spawn() {
+            Ok(_) => println!("Launching OpenPrix Console..."),
+            Err(e) => eprintln!(
+                "Error: Could not launch TUI at {}. {}",
+                tui_path.display(),
+                e
+            ),
+        }
+        return Ok(());
+    }
+
     let root_dir = get_openprix_dir();
     let config_path = root_dir.join(".daemon_config.json");
     let status_path = root_dir.join(".daemon_status.json");
     let db_path = root_dir.join("database.sqlite");
 
-    let port: u16 = fs::read_to_string(&config_path)
+    // 🔥 FIX 2: Dynamic Port Assignment
+    // If the config doesn't exist, we default to 0. Port 0 tells the OS to assign a random free port!
+    let configured_port: u16 = fs::read_to_string(&config_path)
         .ok()
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .and_then(|v| v.get("port").and_then(|p| p.as_u64()))
         .map(|p| p as u16)
-        .unwrap_or(3000);
+        .unwrap_or(0);
 
-    // Format SQLx URI safely for Windows paths
+    // Bind to the port FIRST to secure it
+    let listener =
+        tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], configured_port))).await?;
+    let actual_port = listener.local_addr()?.port(); // Get the port the OS actually gave us!
+
+    // Save the actual port back to the config so the TUI and Frontend know where it is!
+    let config = serde_json::json!({ "port": actual_port });
+    let _ = fs::write(&config_path, config.to_string());
+
     let db_url = format!("sqlite://{}", db_path.to_str().unwrap_or(""));
 
-    println!("Booting OpenPrix Rust Daemon...");
+    println!("Booting OpenPrix Rust Daemon on Port {}...", actual_port);
     let connect_options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
@@ -111,21 +167,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     init_db(&pool).await?;
-    println!(
-        "Database verified and initialized at: {}",
-        db_path.display()
-    );
 
     let cors = CorsLayer::new()
-        .allow_origin([
-            "http://localhost:5173".parse().unwrap(),
-            "http://127.0.0.1:5173".parse().unwrap(),
-        ])
+        .allow_origin(tower_http::cors::Any)
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(tower_http::cors::Any);
 
     let app = Router::new()
-        .route("/", get(|| async { "OpenPrix API is Online!" }))
+        .route("/api/health", get(|| async { "OpenPrix API is Online!" }))
         .route("/api/auth/login", post(routes::auth::login))
         .route(
             "/api/settings/{key}",
@@ -235,18 +284,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/kanban", get(routes::messages::get_kanban_tasks))
         .layer(DefaultBodyLimit::disable())
         .layer(cors)
-        .with_state(pool);
+        .with_state(pool)
+        .fallback(static_handler);
 
     let status = DaemonStatus {
         status: "online".to_string(),
-        port,
-        url: Some(format!("http://127.0.0.1:{}", port)),
+        port: actual_port,
+        url: Some(format!("http://127.0.0.1:{}", actual_port)),
         pid: process::id(),
     };
     fs::write(status_path, serde_json::to_string(&status)?)?;
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    println!("Daemon running on {}", addr);
-    axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
+    // 🔥 Pass the pre-bound listener directly to Axum!
+    axum::serve(listener, app).await?;
     Ok(())
 }
