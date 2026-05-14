@@ -138,10 +138,6 @@ Open the OpenPrix desktop icon. On the connection screen, the portal will automa
 
 ---
 
-## 📜 License
-
-This project is licensed under the terms of the MIT License.
-
-```
-
-```
+## 📝 License & Copyright
+Built for internal use at engineering firms. Standard MIT license applies to the open-source core.
+**© 2026 gokuldc. All rights reserved.**
