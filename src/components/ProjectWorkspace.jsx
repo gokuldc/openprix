@@ -98,6 +98,14 @@ const RAW_CATEGORIES = {
 
 export default function ProjectWorkspace({ projectId, onBack }) {
     const { hasClearance, currentUser } = useAuth();
+    const [project, setProject] = useState("loading");
+    const [regions, setRegions] = useState([]);
+    const [resources, setResources] = useState([]);
+    const [masterBoqs, setMasterBoqs] = useState([]);
+    const [projectBoqItems, setProjectBoqItems] = useState([]);
+    const [crmContacts, setCrmContacts] = useState([]);
+    const [orgStaff, setOrgStaff] = useState([]);
+
 
     // --- SIDEBAR STATE ---
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -106,16 +114,39 @@ export default function ProjectWorkspace({ projectId, onBack }) {
 
     const ALLOWED_CATEGORIES = useMemo(() => {
         const filtered = {};
+
+        // 1. Parse permissions safely (handle old Array format or new Object format)
+        const rawAssigned = project?.assignedStaff || '[]';
+        let permissions = {};
+        try {
+            const parsed = JSON.parse(rawAssigned);
+            if (Array.isArray(parsed)) {
+                // Compatibility mode: Convert old array to object with default permissions
+                parsed.forEach(id => permissions[id] = ["details", "documents"]);
+            } else {
+                permissions = parsed;
+            }
+        } catch (e) { permissions = {}; }
+
+        const userPermissions = permissions[currentUser?.id] || [];
+        const isSuperAdmin = hasClearance(5); // Level 5 always sees everything
+
         for (const [key, cat] of Object.entries(RAW_CATEGORIES)) {
-            if (hasClearance(cat.minClearance)) {
-                const allowedChildren = cat.children.filter(child => hasClearance(child.minClearance));
-                if (allowedChildren.length > 0) {
-                    filtered[key] = { ...cat, children: allowedChildren };
-                }
+            const allowedChildren = cat.children.filter(child => {
+                // 🔥 THE OVERRIDE LOGIC:
+                // Show if: User is L5 OR User has specific project permission OR User has global clearance
+                const hasExplicitAccess = userPermissions.includes(child.id);
+                const hasGlobalAccess = hasClearance(child.minClearance);
+
+                return isSuperAdmin || hasExplicitAccess || hasGlobalAccess;
+            });
+
+            if (allowedChildren.length > 0) {
+                filtered[key] = { ...cat, children: allowedChildren };
             }
         }
         return filtered;
-    }, [hasClearance]);
+    }, [project, hasClearance, currentUser]);
 
     const defaultCategory = Object.keys(ALLOWED_CATEGORIES)[0] || "planning";
     const defaultTab = ALLOWED_CATEGORIES[defaultCategory]?.children[0]?.id || "details";
@@ -142,14 +173,6 @@ export default function ProjectWorkspace({ projectId, onBack }) {
         subcontractors: true, inventory_grns: true, procurement_pos: true, financial_billing: true
     });
 
-    const [project, setProject] = useState("loading");
-    const [regions, setRegions] = useState([]);
-    const [resources, setResources] = useState([]);
-    const [masterBoqs, setMasterBoqs] = useState([]);
-    const [projectBoqItems, setProjectBoqItems] = useState([]);
-    const [crmContacts, setCrmContacts] = useState([]);
-    const [orgStaff, setOrgStaff] = useState([]);
-
     const loadData = async () => {
         try {
             const [p, reg, res, mBoqs, pBoqs, contacts, staff] = await Promise.all([
@@ -159,8 +182,20 @@ export default function ProjectWorkspace({ projectId, onBack }) {
             ]);
 
             if (p && !hasClearance(4)) {
-                const assigned = JSON.parse(p.assignedStaff || '[]');
-                if (!assigned.includes(currentUser.id)) {
+                let isAssigned = false;
+                try {
+                    const parsed = JSON.parse(p.assignedStaff || '[]');
+                    if (Array.isArray(parsed)) {
+                        isAssigned = parsed.includes(currentUser.id);
+                    } else {
+                        // If it's the new object map, check if the ID exists as a key
+                        isAssigned = parsed.hasOwnProperty(currentUser.id);
+                    }
+                } catch (e) {
+                    isAssigned = false;
+                }
+
+                if (!isAssigned) {
                     alert("ACCESS DENIED: You are not assigned to this project's team.");
                     onBack();
                     return;

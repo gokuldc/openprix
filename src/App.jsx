@@ -292,6 +292,12 @@ function AppContent({
     isProfileOpen, setIsProfileOpen, profileData, setProfileData, generateSecureId
 }) {
     const { currentUser, logout, hasClearance } = useAuth();
+    let userGlobalPerms = [];
+    try {
+        userGlobalPerms = typeof currentUser?.globalPermissions === 'string'
+            ? JSON.parse(currentUser.globalPermissions)
+            : (currentUser?.globalPermissions || []);
+    } catch (e) { }
 
     const handleOpenGlobalChat = () => {
         setGlobalChatOpen(true);
@@ -327,14 +333,14 @@ function AppContent({
     };
 
     const navItems = [
-        { label: 'Home Dashboard', icon: <HomeIcon />, action: () => setCurrentView('home'), clearance: 1, color: 'text.primary' },
-        { label: 'New Project', icon: <CreateNewFolderIcon />, action: handleCreateProject, clearance: 3, color: 'primary.main' }, // 🔥 Visual fix
-        { label: 'Project Archive', icon: <FolderSpecialIcon />, action: () => setCurrentView('archive'), clearance: 1, color: 'info.main' },
-        { label: 'Directory', icon: <AutoStoriesIcon />, action: () => setCurrentView('directory'), clearance: 3, color: 'success.main' },
-        { label: 'Database Editor', icon: <StorageIcon />, action: () => setCurrentView('database'), clearance: 2, color: 'secondary.main' },
-        { label: 'Organization Logs', icon: <MenuBookIcon />, action: () => setCurrentView('logs'), clearance: 1, color: 'warning.main' },
-        { label: 'Network Host', icon: <RouterIcon />, action: () => setCurrentView('servermanager'), clearance: 5, color: 'info.main', tauriOnly: true },
-        { label: 'System Settings', icon: <SettingsIcon />, action: () => setCurrentView('settings'), clearance: 5, color: 'text.secondary' }
+        { id: 'home', label: 'Home Dashboard', icon: <HomeIcon />, action: () => setCurrentView('home'), clearance: 1, color: 'text.primary' },
+        { id: 'new_project', label: 'New Project', icon: <CreateNewFolderIcon />, action: handleCreateProject, clearance: 3, color: 'primary.main' },
+        { id: 'archive', label: 'Project Archive', icon: <FolderSpecialIcon />, action: () => setCurrentView('archive'), clearance: 1, color: 'info.main' },
+        { id: 'directory', label: 'Directory', icon: <AutoStoriesIcon />, action: () => setCurrentView('directory'), clearance: 3, color: 'success.main' },
+        { id: 'database', label: 'Database Editor', icon: <StorageIcon />, action: () => setCurrentView('database'), clearance: 2, color: 'secondary.main' },
+        { id: 'logs', label: 'Organization Logs', icon: <MenuBookIcon />, action: () => setCurrentView('logs'), clearance: 1, color: 'warning.main' },
+        { id: 'servermanager', label: 'Network Host', icon: <RouterIcon />, action: () => setCurrentView('servermanager'), clearance: 5, color: 'info.main', tauriOnly: true },
+        { id: 'settings', label: 'System Settings', icon: <SettingsIcon />, action: () => setCurrentView('settings'), clearance: 5, color: 'text.secondary' }
     ];
 
     const userItems = [
@@ -367,8 +373,13 @@ function AppContent({
                     <Box sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', pt: 2 }}>
                         <List sx={{ px: 1 }}>
                             {navItems.map((item, idx) => {
-                                if (!hasClearance(item.clearance)) return null;
+                                // 🔥 THE GATEKEEPER: Check Level OR Global Override
+                                const hasLevelAccess = hasClearance(item.clearance);
+                                const hasGranularOverride = userGlobalPerms.includes(item.id);
+
+                                if (!hasLevelAccess && !hasGranularOverride) return null;
                                 if (item.tauriOnly && !isTauri) return null;
+
                                 return (
                                     <Tooltip key={idx} title={!sidebarOpen ? item.label : ""} placement="right" disableInteractive>
                                         <ListItem disablePadding sx={{ mb: 1 }}>

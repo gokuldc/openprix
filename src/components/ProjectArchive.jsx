@@ -33,11 +33,15 @@ export default function ProjectArchive({ onOpenProject }) {
     const visibleProjects = useMemo(() => {
         if (hasClearance(4)) return projects;
         return projects.filter(p => {
-            try { return JSON.parse(p.assignedStaff || '[]').includes(currentUser?.id); }
+            try {
+                const parsed = JSON.parse(p.assignedStaff || '[]');
+                // 🔥 Safely handle both Array (legacy) and Object (new) formats
+                if (Array.isArray(parsed)) return parsed.includes(currentUser?.id);
+                return parsed.hasOwnProperty(currentUser?.id);
+            }
             catch (e) { return false; }
         });
     }, [projects, currentUser, hasClearance]);
-
     const filteredProjects = useMemo(() => {
         if (!searchQuery.trim()) return visibleProjects;
         const query = searchQuery.toLowerCase();
