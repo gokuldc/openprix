@@ -411,15 +411,28 @@ export default function ProjectWorkspace({ projectId, onBack }) {
                     </Box>
 
                     <Box display="flex" gap={1.5} flexWrap="wrap" justifyContent={{ xs: 'flex-start', lg: 'flex-end' }}>
-                        {hasClearance(3) && (
-                            <>
-                                <input type="file" accept=".json" ref={importFileRef} style={{ display: 'none' }} onChange={handleImportData} />
-                                <Button variant="outlined" color="primary" startIcon={<UploadIcon />} onClick={() => importFileRef.current.click()} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>IMPORT</Button>
-                                <Button variant="outlined" color="primary" startIcon={<SyncIcon />} onClick={() => setIsExportOpen(true)} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>SYNC</Button>
-                            </>
-                        )}
-                        <Button variant="outlined" color="error" startIcon={<PictureAsPdfIcon />} onClick={() => exportProjectPdf(project, renderedProjectBoq, totalAmount)} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>PDF</Button>
-                        <Button variant="contained" color="success" startIcon={<DownloadIcon />} onClick={() => exportProjectExcel(project, renderedProjectBoq, masterBoqs, resources)} disableElevation sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>EXCEL</Button>
+                        {/* 🔥 IMPORT and SYNC buttons removed */}
+
+                        <Button
+                            variant="outlined"
+                            color="error"
+                            startIcon={<PictureAsPdfIcon />}
+                            onClick={() => exportProjectPdf(project, renderedProjectBoq, totalAmount)}
+                            sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}
+                        >
+                            PDF
+                        </Button>
+
+                        <Button
+                            variant="contained"
+                            color="success"
+                            startIcon={<DownloadIcon />}
+                            onClick={() => exportProjectExcel(project, renderedProjectBoq, masterBoqs, resources)}
+                            disableElevation
+                            sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}
+                        >
+                            EXCEL
+                        </Button>
                     </Box>
                 </Box>
 

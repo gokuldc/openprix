@@ -8,28 +8,85 @@ export default function BackupRestoreTab({ loadData }) {
     const [isRestoreOpen, setIsRestoreOpen] = useState(false);
 
     const handleBackup = async () => {
-        const res = await window.api.db.backupDatabase();
-        if (res.success) alert("Database backup saved successfully!");
-        else if (!res.canceled) alert("Backup failed: " + res.error);
+        try {
+            const res = await window.api.db.backupDatabase();
+
+            // If restCall caught a network error, it returns { success: false, error: "..." }
+            if (res && res.success === false) {
+                alert("Backup failed: " + res.error);
+                return;
+            }
+
+            // res is our pure base64 string! Let's trigger a native file download.
+            const dateStr = new Date().toISOString().split('T')[0];
+            const link = document.createElement('a');
+            link.href = `data:application/octet-stream;base64,${res}`;
+            link.download = `OpenPrix_Master_Backup_${dateStr}.sqlite`;
+
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            alert("Database backup downloaded successfully!");
+        } catch (e) {
+            alert("Backup error: " + e.message);
+        }
     };
 
     const handleRestore = async (mode) => {
         setIsRestoreOpen(false);
-        const res = await window.api.db.restoreDatabase(mode);
-        if (res.success) {
-            alert(`Master Database restored successfully (${mode.toUpperCase()})! Active projects were safely preserved.`);
-            loadData();
-        } else if (!res.canceled) {
-            alert("Restore failed: " + res.error);
+
+        if (mode !== 'replace') {
+            alert("Note: The current Rust engine only supports FULL REPLACE for database restorations.");
+        }
+
+        try {
+            // 1. Ask the OS to pick a file
+            const fileResult = await window.api.os.pickFile(".sqlite");
+            if (!fileResult) return; // User canceled the dialog
+
+            let base64Data = "";
+
+            // Handle pure Web Fallback (returns object with base64)
+            if (typeof fileResult === 'object' && fileResult.base64) {
+                base64Data = fileResult.base64;
+            }
+            // Handle Native Tauri (returns file path string)
+            else if (typeof fileResult === 'string') {
+                const b64Str = await window.api.os.getBase64(fileResult);
+                if (!b64Str) throw new Error("Could not read the selected file.");
+                // Tauri returns "data:application/octet-stream;base64,XYZ...", so we split it
+                base64Data = b64Str.split(',')[1];
+            }
+
+            if (!base64Data) throw new Error("No valid file data could be extracted.");
+
+            // 2. Send the raw base64 data to the Rust Daemon
+            const res = await window.api.db.restoreDatabase(base64Data);
+
+            // If successful, our restCall returns the backend's success string directly
+            if (typeof res === 'string') {
+                alert("DATABASE RESTORED!\n\n" + res + "\n\nThe application will now close. Please restart the OpenPrix Daemon and Client.");
+                loadData();
+            } else if (res && res.success === false) {
+                alert("Restore failed: " + res.error);
+            }
+        } catch (e) {
+            alert("Restore error: " + e.message);
         }
     };
 
     const purgeMasterDatabase = async () => {
         if (window.confirm("CRITICAL WARNING: This will permanently delete ALL Regions, Resources, and Databook items.")) {
             if (window.confirm("Are you absolutely sure? Active projects may lose their master reference data. Type 'OK' to proceed:")) {
-                await window.api.db.purgeDatabase();
-                alert("Master Database has been completely purged.");
-                loadData();
+                // Assuming you have a purge route configured!
+                const res = await window.api.db.purgeDatabase?.();
+                if (res && res.success === false) {
+                    alert("Purge Failed: " + res.error);
+                } else {
+                    alert("Master Database has been completely purged.");
+                    loadData();
+                }
             }
         }
     };
@@ -81,7 +138,7 @@ export default function BackupRestoreTab({ loadData }) {
                 </DialogTitle>
                 <DialogContent sx={{ pt: 3 }}>
                     <Typography sx={{ fontFamily: "'JetBrains Mono', monospace", mb: 3, color: '#ccc', fontSize: '12px' }}>
-                        How would you like to process the Master Data (Regions, Resources, Databook) from this backup file? <strong>Your active projects will not be affected.</strong>
+                        How would you like to process the Master Data from this backup file?
                     </Typography>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <Button variant="outlined" color="info" onClick={() => handleRestore('append')} sx={{ fontFamily: "'JetBrains Mono', monospace", justifyContent: 'flex-start', textTransform: 'none', py: 1.5, fontSize: '12px', textAlign: 'left' }}>

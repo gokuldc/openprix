@@ -5,6 +5,7 @@ import {
     Badge, TextField, Paper, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divider, Grid
 } from '@mui/material';
 
+import ConnectPortal from './ConnectPortal';
 // Icons
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
@@ -79,6 +80,8 @@ function GlobalChatButton({ chatOpen, onOpen }) {
 }
 
 export default function App() {
+    const [isConnected, setIsConnected] = useState(false);
+    const isTauri = '__TAURI_INTERNALS__' in window;
     const [mode, setMode] = useState(() => localStorage.getItem('themeMode') || 'dark');
     const [currentView, setCurrentView] = useState('home');
     const [activeProjectId, setActiveProjectId] = useState(null);
@@ -99,10 +102,36 @@ export default function App() {
         return newMode;
     });
 
+    // --- HOOK 1: Connection Boot Sequence ---
+    useEffect(() => {
+        if (!isTauri) {
+            setIsConnected(true);
+            return;
+        }
+
+        const checkExistingConnection = async () => {
+            const savedUrl = localStorage.getItem('openprix_last_server');
+            if (savedUrl) {
+                try {
+                    const response = await fetch(`${savedUrl}/api/health`);
+                    if (response.ok) {
+                        setIsConnected(true);
+                    }
+                } catch (e) {
+                    console.warn("[OpenPrix] Daemon offline or unreachable. Prompting for new connection.");
+                }
+            }
+        };
+
+        checkExistingConnection();
+    }, [isTauri]);
+
+    // --- HOOK 2: Fetch Staff ---
     useEffect(() => {
         window.api?.db?.getOrgStaff().then(data => setOrgStaff(data || []));
     }, [currentView]);
 
+    // --- HOOK 3: Sync Settings ---
     useEffect(() => {
         if (window.api && window.api.onOpenSyncSettings) {
             window.api.onOpenSyncSettings(() => {
@@ -114,6 +143,18 @@ export default function App() {
         }
     }, []);
 
+    // 🔥 EARLY RETURN MUST GO HERE (AFTER ALL HOOKS!)
+    if (!isConnected && isTauri) {
+        return (
+            <ConnectPortal onConnected={() => {
+                // When connected, we force a hard reload so webBridge.js 
+                // catches the newly saved IP address on boot!
+                window.location.reload();
+            }} />
+        );
+    }
+
+    // --- REST OF APP LOGIC ---
     const handleSaveSyncUrl = async () => {
         await window.api.db.saveSettings('sync_server_url', { value: syncUrl });
         setSyncModalOpen(false);
@@ -223,6 +264,7 @@ export default function App() {
                     <CssBaseline />
                     <Gatekeeper>
                         <AppContent
+                            isTauri={isTauri}
                             mode={mode} theme={theme} toggleTheme={toggleTheme}
                             currentView={currentView} setCurrentView={setCurrentView}
                             activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId}
@@ -244,7 +286,7 @@ export default function App() {
 }
 
 function AppContent({
-    mode, theme, toggleTheme, currentView, setCurrentView, activeProjectId, setActiveProjectId,
+    isTauri, mode, theme, toggleTheme, currentView, setCurrentView, activeProjectId, setActiveProjectId,
     aboutOpen, setAboutOpen, sidebarOpen, setSidebarOpen, globalChatOpen, setGlobalChatOpen,
     orgStaff, syncModalOpen, setSyncModalOpen, syncUrl, setSyncUrl, handleSaveSyncUrl,
     isProfileOpen, setIsProfileOpen, profileData, setProfileData, generateSecureId
@@ -291,7 +333,7 @@ function AppContent({
         { label: 'Directory', icon: <AutoStoriesIcon />, action: () => setCurrentView('directory'), clearance: 3, color: 'success.main' },
         { label: 'Database Editor', icon: <StorageIcon />, action: () => setCurrentView('database'), clearance: 2, color: 'secondary.main' },
         { label: 'Organization Logs', icon: <MenuBookIcon />, action: () => setCurrentView('logs'), clearance: 1, color: 'warning.main' },
-        { label: 'Network Host', icon: <RouterIcon />, action: () => setCurrentView('servermanager'), clearance: 5, color: 'info.main' },
+        { label: 'Network Host', icon: <RouterIcon />, action: () => setCurrentView('servermanager'), clearance: 5, color: 'info.main', tauriOnly: true },
         { label: 'System Settings', icon: <SettingsIcon />, action: () => setCurrentView('settings'), clearance: 5, color: 'text.secondary' }
     ];
 
@@ -326,6 +368,7 @@ function AppContent({
                         <List sx={{ px: 1 }}>
                             {navItems.map((item, idx) => {
                                 if (!hasClearance(item.clearance)) return null;
+                                if (item.tauriOnly && !isTauri) return null;
                                 return (
                                     <Tooltip key={idx} title={!sidebarOpen ? item.label : ""} placement="right" disableInteractive>
                                         <ListItem disablePadding sx={{ mb: 1 }}>

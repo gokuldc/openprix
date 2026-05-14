@@ -282,6 +282,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(routes::messages::check_notifications),
         )
         .route("/api/kanban", get(routes::messages::get_kanban_tasks))
+        .route("/api/db/backup", post(routes::db::backup_database))
+        .route("/api/db/restore", post(routes::db::restore_database))
+        .route("/api/db/purge", post(routes::db::purge_database))
         .layer(DefaultBodyLimit::disable())
         .layer(cors)
         .with_state(pool)

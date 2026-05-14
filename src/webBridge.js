@@ -10,25 +10,28 @@ if (!window.crypto.randomUUID) {
 }
 
 /**
- * 🔥 DYNAMIC SERVER DISCOVERY
- * 1. If we are served by the daemon, our origin is the server.
- * 2. If we are in Electron, we check localStorage (from our connect screen).
- * 3. Otherwise, fallback to the default port 3000.
+ * 🔥 TAURI DETECTION & DYNAMIC SERVER DISCOVERY
  */
+const isTauri = '__TAURI_INTERNALS__' in window;
+
 const getTargetUrl = () => {
-    // If we are NOT on the Vite dev port (5173), we are likely being served by the Rust Daemon
-    if (window.location.port !== '5173' && window.location.hostname !== 'localhost') {
+    // 1. If we are in Tauri, we MUST rely on the saved connection URL from the portal
+    if (isTauri) {
+        return localStorage.getItem('openprix_last_server') || 'http://127.0.0.1:3000';
+    }
+
+    // 2. 🔥 THE FIX: If we are purely in a web browser and NOT on the Vite dev port (5173),
+    // it means the Rust Daemon is serving us directly. Just use the current URL!
+    if (window.location.port !== '5173') {
         return window.location.origin;
     }
-    // Check if we saved a URL during the Electron connection phase
-    const saved = localStorage.getItem('openprix_last_server');
-    if (saved) return saved;
 
-    return 'http://127.0.0.1:3000'; // Default Fallback
+    // 3. Vite Dev Server fallback (for testing frontend without compiling)
+    return localStorage.getItem('openprix_last_server') || 'http://127.0.0.1:3000';
 };
 
 const SERVER_URL = getTargetUrl();
-console.log(`[OpenPrix] Connecting to Nexus Daemon at: ${SERVER_URL}`);
+console.log(`[OpenPrix] Connecting to Nexus Daemon at: ${SERVER_URL} (Tauri Client: ${isTauri})`);
 
 // 🚀 THE PURE REST CLIENT
 const restCall = async (method, endpoint, data = null) => {
@@ -46,6 +49,24 @@ const restCall = async (method, endpoint, data = null) => {
         console.error(`Network REST Error [${method} ${endpoint}]:`, error);
         return { success: false, error: error.message };
     }
+};
+
+// --- NATIVE OS BRIDGE ---
+
+let tauriInvoke = null;
+if (isTauri) {
+    // Dynamically import Tauri core so it doesn't break the pure web version
+    import('@tauri-apps/api/core').then(module => {
+        tauriInvoke = module.invoke;
+    }).catch(err => console.error("Failed to load Tauri API", err));
+}
+
+const tauriOsCalls = {
+    // We will write these exact Rust functions in Phase 4!
+    pickFile: () => tauriInvoke ? tauriInvoke('os_pick_file') : null,
+    openFile: (filePath) => tauriInvoke ? tauriInvoke('os_open_file', { filePath }) : null,
+    getBase64: (filePath) => tauriInvoke ? tauriInvoke('os_get_base64', { filePath }) : null,
+    pickDirectory: () => tauriInvoke ? tauriInvoke('os_pick_directory') : null
 };
 
 const webPickFile = (accept = "*") => {
@@ -91,6 +112,10 @@ window.api = {
         verifyEmployeeLogin: (un, pw) => restCall('POST', '/api/auth/login', { username: un, password: pw }),
         getSettings: (key) => restCall('GET', `/api/settings/${key}`),
         saveSettings: (key, val) => restCall('POST', `/api/settings/${key}`, { value: val }),
+
+        backupDatabase: () => restCall('POST', '/api/db/backup'),
+        restoreDatabase: (fileData) => restCall('POST', '/api/db/restore', { data: fileData }),
+        purgeDatabase: () => restCall('POST', '/api/db/purge'),
 
         getRegions: () => restCall('GET', '/api/regions'),
         createRegion: (name) => restCall('POST', '/api/regions', { name }),
@@ -146,5 +171,6 @@ window.api = {
         checkNotifications: (id, lc) => restCall('GET', `/api/notifications/check`),
         getKanbanTasks: () => restCall('GET', '/api/kanban'),
     },
-    os: { ...(window.electronHost && window.electronHost.os ? window.electronHost.os : webOsFallbacks), ...osNetworkCalls }
+    // 🔥 Clean injection: If Tauri, use Rust invokes. If Web, use Fallbacks.
+    os: { ...(isTauri ? tauriOsCalls : webOsFallbacks), ...osNetworkCalls }
 };

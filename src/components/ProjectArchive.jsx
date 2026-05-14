@@ -90,18 +90,7 @@ export default function ProjectArchive({ onOpenProject }) {
                         <FolderSpecialIcon color="primary" sx={{ fontSize: 32 }} />
                         <Typography variant="h4" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px' }}>PROJECT_ARCHIVE</Typography>
                     </Box>
-
-                    <Box display="flex" gap={1}>
-                        {hasClearance(4) && (
-                            <>
-                                <Button size="small" variant="outlined" color="info" startIcon={<DownloadIcon />} onClick={handleExport} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>EXPORT_ALL</Button>
-                                <Button size="small" variant="outlined" color="success" startIcon={<UploadIcon />} onClick={handleFileSelect} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>IMPORT_SQLITE</Button>
-                            </>
-                        )}
-                        {hasClearance(5) && (
-                            <Button size="small" variant="outlined" color="error" startIcon={<DeleteForeverIcon />} onClick={() => window.api.db.purgeProjects().then(loadData)} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>PURGE</Button>
-                        )}
-                    </Box>
+                    {/* 🔥 Action buttons removed as Backup/Restore tab handles global operations */}
                 </Box>
 
                 {/* SEARCH */}

@@ -30,7 +30,6 @@ import { useSettings } from "../context/SettingsContext";
 export default function Home() {
     const theme = useTheme();
     const { currentUser } = useAuth();
-    // 🔥 FIX: Destructured formatCurrency so we can display beautiful revenue numbers
     const { settings, formatCurrency } = useSettings();
 
     const [brandName, setBrandName] = useState("");
@@ -45,17 +44,25 @@ export default function Home() {
 
     const loadData = async () => {
         try {
-            const [projData, resData, boqData, regData, contactData, staffData] = await Promise.all([
-                window.api.db.getProjects(), window.api.db.getResources(), window.api.db.getMasterBoqs(),
-                window.api.db.getRegions(), window.api.db.getCrmContacts(), window.api.db.getOrgStaff()
+            const [projData, resData, boqData, regData, crmData, staffData] = await Promise.all([
+                window.api.db.getProjects(),
+                window.api.db.getResources(),
+                window.api.db.getMasterBoqs(),
+                window.api.db.getRegions(),
+                window.api.db.getCrmContacts(),
+                window.api.db.getOrgStaff()
             ]);
-            setProjects(projData || []);
-            setResources(resData || []);
-            setMasterBoqs(boqData || []);
-            setRegions(regData || []);
-            setCrmContacts(contactData || []);
-            setOrgStaff(staffData || []);
-        } catch (error) { console.error(error); }
+
+            // Validate that we actually got arrays back (prevents crash on closed pool)
+            if (Array.isArray(projData)) setProjects(projData);
+            if (Array.isArray(resData)) setResources(resData);
+            if (Array.isArray(boqData)) setMasterBoqs(boqData);
+            if (Array.isArray(regData)) setRegions(regData);
+            if (Array.isArray(crmData)) setCrmContacts(crmData);
+            if (Array.isArray(staffData)) setOrgStaff(staffData);
+        } catch (error) {
+            console.error("Dashboard Load Error:", error);
+        }
     };
 
     const loadBranding = async () => {

@@ -5,6 +5,7 @@ edition = "2024"
 authors = ["GOKUL DC <gokuldc93@gmail.com>"]
 description = "OpenPrix Core: High-performance Engineering ERP & Server Daemon"
 homepage = "https://github.com/gokuldc/openprix"
+default-run = "openprix"
 
 [dependencies]
 # The web framework (Replacing Express)

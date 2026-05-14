@@ -1,7 +1,7 @@
 {
   "name": "openprix-client",
   "private": true,
-  "version": "2.0.0-RC1",
+  "version": "2.0.0-RC2",
   "description": "The Operating System for Modern Engineering & Construction Firms.",
   "author": "Gokul DC",
   "type": "module",
@@ -10,9 +10,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "electron:start": "electron .",
-    "dev:electron": "cross-env NODE_ENV=development concurrently -k \"npm run dev\" \"wait-on http://127.0.0.1:5173 && npm run electron:start\"",
-    "build:electron": "npm run build && electron-builder"
+    "tauri": "tauri",
+    "dev:tauri": "tauri dev",
+    "build:tauri": "tauri build"
   },
   "build": {
     "appId": "com.openprix.estimator",
@@ -41,6 +41,7 @@
     "@emotion/styled": "^11.14.0",
     "@mui/icons-material": "^6.4.1",
     "@mui/material": "^6.4.1",
+    "@tauri-apps/api": "^2.11.0",
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
     "jspdf": "^4.2.1",
@@ -51,11 +52,10 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.1",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
-    "electron": "^34.2.0",
-    "electron-builder": "^25.1.8",
     "vite": "^6.4.1",
     "wait-on": "^8.0.2"
   }
