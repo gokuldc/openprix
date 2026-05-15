@@ -80,13 +80,16 @@ async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
 
     if count.0 == 0 {
         let admin_insert = "
-            INSERT INTO org_staff (id, name, designation, department, status, email, phone, createdAt, username, password, role, accessLevel)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO org_staff (id, name, designation, department, status, email, phone, createdAt, username, password, role, accessLevel, globalPermissions)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ";
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64;
+
+        // 🔥 HASH THE DEFAULT PASSWORD
+        let hashed_pw = bcrypt::hash("admin123", bcrypt::DEFAULT_COST).unwrap_or_default();
 
         sqlx::query(admin_insert)
             .bind("admin_id")
@@ -98,13 +101,13 @@ async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
             .bind("")
             .bind(now)
             .bind("admin")
-            .bind("admin123")
+            .bind(hashed_pw) // 🔥 BIND THE HASHED PASSWORD HERE
             .bind("Admin")
             .bind(5)
             .bind("[]")
             .execute(pool)
             .await?;
-        println!("Default admin account created.");
+        println!("Default admin account created with secured password.");
     }
     Ok(())
 }
@@ -280,8 +283,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/regions/{id}",
             delete(routes::resources::delete_region),
         )
-        .route("/api/os/download", get(routes::os::download_file))
+        .route("/api/os/scaffold", post(routes::os::scaffold_project))
         .route("/api/os/upload", post(routes::os::upload_file))
+        .route("/api/os/download", get(routes::os::download_file))
+        .route("/api/os/open", post(routes::os::open_file))
         .route(
             "/api/notifications/check",
             get(routes::messages::check_notifications),

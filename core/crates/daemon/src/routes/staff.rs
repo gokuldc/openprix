@@ -40,6 +40,27 @@ pub async fn save_staff(
     State(pool): State<SqlitePool>,
     Json(payload): Json<Staff>,
 ) -> Result<Json<ApiResponse<String>>, (StatusCode, Json<ApiResponse<()>>)> {
+    // 🔥 PASSWORD SECURITY INTERCEPTOR
+    let mut final_password = payload.password.clone();
+    if let Some(pw) = &payload.password {
+        // Only hash it if it isn't empty AND isn't already a bcrypt hash (bcrypt hashes always start with "$2")
+        if !pw.is_empty() && !pw.starts_with("$2") {
+            match bcrypt::hash(pw, bcrypt::DEFAULT_COST) {
+                Ok(hashed) => final_password = Some(hashed),
+                Err(_) => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiResponse {
+                            success: false,
+                            data: None,
+                            error: Some("Password hashing failed".to_string()),
+                        }),
+                    ));
+                }
+            }
+        }
+    }
+
     let query = "
         INSERT INTO org_staff (id, name, designation, department, status, email, phone, createdAt, username, password, role, accessLevel, globalPermissions)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -67,7 +88,7 @@ pub async fn save_staff(
         .bind(&payload.phone)
         .bind(payload.createdAt)
         .bind(&payload.username)
-        .bind(&payload.password)
+        .bind(&final_password) // 🔥 BIND THE SECURED PASSWORD HERE
         .bind(&payload.role)
         .bind(payload.accessLevel)
         .bind(&payload.globalPermissions)
