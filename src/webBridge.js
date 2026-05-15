@@ -83,9 +83,24 @@ const webPickFile = (accept = "*") => {
 };
 
 const osNetworkCalls = {
-    scaffoldProject: () => console.log("Not implemented in REST yet"),
-    renameProjectFolder: () => console.log("Not implemented in REST yet"),
-    uploadFileWeb: (fileName, base64Data) => restCall('POST', '/api/os/upload', { filename: fileName, base64: base64Data }),
+    // Passes targetFolder to the backend so Rust knows exactly where to save it
+    uploadFileWeb: async (fileName, base64Data, targetFolder = null) => {
+        const res = await restCall('POST', '/api/os/upload', {
+            filename: fileName,
+            base64: base64Data,
+            targetFolder
+        });
+        // We just return the string path on success so the React components can save it to DB
+        return res.success ? res.data : res;
+    },
+
+    openFile: (path) => restCall('POST', '/api/os/open', { path }),
+
+    scaffoldProject: (payload) => restCall('POST', '/api/os/scaffold', payload),
+
+    renameProjectFolder: (payload) => restCall('POST', '/api/os/rename', payload), // Future proofing
+
+    getServerUrl: () => SERVER_URL
 };
 
 const webOsFallbacks = {

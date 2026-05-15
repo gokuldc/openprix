@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
     Box, Typography, Paper, IconButton, Tooltip,
     List, ListItem, ListItemButton, ListItemIcon, ListItemText
 } from "@mui/material";
 
-// Workspace Navigation Icons
 import MenuIcon from '@mui/icons-material/Menu';
 import MenuOpenIcon from '@mui/icons-material/MenuOpen';
 import LocalAtmOutlinedIcon from '@mui/icons-material/LocalAtmOutlined';
@@ -12,29 +11,59 @@ import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined';
 import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
 import SettingsBackupRestoreOutlinedIcon from '@mui/icons-material/SettingsBackupRestoreOutlined';
 
-// Components
 import ResourcesTab from "./database/ResourcesTab";
 import CreateBoqTab from "./database/CreateBoqTab";
 import ViewBoqTab from "./database/ViewBoqTab";
 import BackupRestoreTab from "./database/BackupRestoreTab";
 
-// Import the Auth Hook
 import { useAuth } from "../context/AuthContext";
+// 🔥 REACT QUERY HOOKS
+import { useQueryClient } from '@tanstack/react-query';
+import { useRegions, useResources, useMasterBoqs, useDeleteMasterBoq } from '../hooks/useQueries';
 
 export default function DatabaseEditor() {
     const { hasClearance, currentUser } = useAuth();
+    const queryClient = useQueryClient();
 
-    // --- SIDEBAR STATE ---
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const SIDEBAR_CLOSED_WIDTH = 68;
     const SIDEBAR_OPEN_WIDTH = 260;
 
-    const [regions, setRegions] = useState([]);
-    const [resources, setResources] = useState([]);
-    const [masterBoqs, setMasterBoqs] = useState([]);
     const [editingBoq, setEditingBoq] = useState(null);
 
-    // 🔥 PARSE GLOBAL PERMISSIONS
+    // 🔥 AUTOMATIC DATA FETCHING
+    const { data: regions = [] } = useRegions();
+    const { data: rawResources = [] } = useResources();
+    const { data: rawMasterBoqs = [] } = useMasterBoqs();
+    const deleteMasterBoqMutation = useDeleteMasterBoq();
+
+    // 🔥 SAFE PARSING VIA USEMEMO (Lightning fast caching)
+    const resources = useMemo(() => {
+        const parseSafe = (str, fallback = []) => {
+            if (!str) return fallback;
+            if (typeof str !== 'string') return str;
+            try { return JSON.parse(str); } catch { return fallback; }
+        };
+        return rawResources.map(r => ({ ...r, rates: parseSafe(r.rates, {}), rateHistory: parseSafe(r.rateHistory, []) }));
+    }, [rawResources]);
+
+    const masterBoqs = useMemo(() => {
+        const parseSafe = (str, fallback = []) => {
+            if (!str) return fallback;
+            if (typeof str !== 'string') return str;
+            try { return JSON.parse(str); } catch { return fallback; }
+        };
+        return rawMasterBoqs.map(b => ({ ...b, components: parseSafe(b.components, []) }));
+    }, [rawMasterBoqs]);
+
+    // 🔥 TRANSITIONAL LOADDATA: Tells React Query to refresh the cache!
+    // Passed to downstream components so they don't break.
+    const loadData = () => {
+        queryClient.invalidateQueries({ queryKey: ['regions'] });
+        queryClient.invalidateQueries({ queryKey: ['resources'] });
+        queryClient.invalidateQueries({ queryKey: ['masterBoqs'] });
+    };
+
     const userPerms = useMemo(() => {
         try {
             return typeof currentUser?.globalPermissions === 'string'
@@ -45,43 +74,15 @@ export default function DatabaseEditor() {
 
     const canAccess = (minClearance, id) => hasClearance(minClearance) || userPerms.includes(id);
 
-    const loadData = async () => {
-        try {
-            const [reg, res, boqs] = await Promise.all([
-                window.api.db.getRegions(),
-                window.api.db.getResources(),
-                window.api.db.getMasterBoqs()
-            ]);
-
-            const parseSafe = (str, fallback = []) => {
-                if (!str) return fallback;
-                if (typeof str !== 'string') return str;
-                try { return JSON.parse(str); } catch { return fallback; }
-            };
-
-            const safeRes = (res || []).map(r => ({ ...r, rates: parseSafe(r.rates, {}), rateHistory: parseSafe(r.rateHistory, []) }));
-            const safeMBoqs = (boqs || []).map(b => ({ ...b, components: parseSafe(b.components, []) }));
-
-            setRegions(reg || []);
-            setResources(safeRes);
-            setMasterBoqs(safeMBoqs);
-        } catch (error) {
-            console.error("Failed to load SQLite data:", error);
-        }
-    };
-
-    useEffect(() => { loadData(); }, []);
-
     const deleteMasterBoq = async (id) => {
-        if (!canAccess(3, 'viewBoq')) return alert("Access Denied: Clearance required to delete Master Databook items.");
+        if (!canAccess(3, 'viewBoq')) return alert("Access Denied: Clearance required.");
         if (window.confirm("Delete this Databook item?")) {
-            await window.api.db.deleteMasterBoq(id);
-            loadData();
+            await deleteMasterBoqMutation.mutateAsync(id);
         }
     };
 
     const handleEditBoq = (boq) => {
-        if (!canAccess(3, 'createBoq')) return alert("Access Denied: Clearance required to edit Master Databook items.");
+        if (!canAccess(3, 'createBoq')) return alert("Access Denied: Clearance required.");
         setEditingBoq(boq);
         setTab("createBoq");
     };
@@ -91,7 +92,6 @@ export default function DatabaseEditor() {
         setTab("viewBoq");
     };
 
-    // 🔥 FILTER NAV ITEMS VIA GATEKEEPER
     const PERMITTED_NAV_ITEMS = useMemo(() => {
         const items = [
             { id: "resources", label: "LOCAL MARKET RATES", minClearance: 2, icon: <LocalAtmOutlinedIcon />, color: '#10b981' },
@@ -111,12 +111,11 @@ export default function DatabaseEditor() {
     };
 
     if (PERMITTED_NAV_ITEMS.length === 0) {
-        return <Box p={5} textAlign="center"><Typography sx={{ color: 'error.main', fontFamily: "'JetBrains Mono', monospace" }}>ACCESS_DENIED: No modules permitted in Database Editor.</Typography></Box>;
+        return <Box p={5} textAlign="center"><Typography sx={{ color: 'error.main', fontFamily: "'JetBrains Mono', monospace" }}>ACCESS_DENIED: No modules permitted.</Typography></Box>;
     }
 
     return (
         <Box sx={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>
-            {/* DB SIDEBAR */}
             <Paper elevation={0} sx={{ width: sidebarOpen ? SIDEBAR_OPEN_WIDTH : { xs: 0, md: SIDEBAR_CLOSED_WIDTH }, flexShrink: 0, bgcolor: 'rgba(13, 31, 60, 0.5)', borderRight: '1px solid', borderColor: 'divider', transition: 'width 0.225s cubic-bezier(0.4, 0, 0.2, 1)', overflowX: 'hidden', display: 'flex', flexDirection: 'column', position: { xs: 'fixed', md: 'relative' }, height: '100%', zIndex: { xs: 1100, md: 1 }, left: 0, top: 0 }}>
                 <Box sx={{ p: 1, display: 'flex', justifyContent: sidebarOpen ? 'flex-end' : 'center', alignItems: 'center', height: 60 }}>
                     <IconButton onClick={() => setSidebarOpen(!sidebarOpen)} sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
@@ -147,10 +146,8 @@ export default function DatabaseEditor() {
                 </Box>
             </Paper>
 
-            {/* Mobile Overlay */}
             {sidebarOpen && <Box onClick={() => setSidebarOpen(false)} sx={{ display: { xs: 'block', md: 'none' }, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, bgcolor: 'rgba(0,0,0,0.5)', zIndex: 1000 }} />}
 
-            {/* MAIN CONTENT AREA */}
             <Box sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', overflowX: 'hidden', p: { xs: 2, md: 3 } }}>
                 <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', lg: 'center' }, mb: 4, pb: 3, borderBottom: '1px solid', borderColor: 'divider', gap: { xs: 2, lg: 0 } }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -163,7 +160,6 @@ export default function DatabaseEditor() {
                     </Box>
                 </Box>
 
-                {/* DYNAMIC SECURE TAB CONTENT */}
                 <Box sx={{ flexGrow: 1 }}>
                     {tab === "resources" && canAccess(2, 'resources') && <ResourcesTab regions={regions} resources={resources} loadData={loadData} />}
                     {tab === "viewBoq" && canAccess(2, 'viewBoq') && <ViewBoqTab masterBoqs={masterBoqs} regions={regions} resources={resources} onEditBoq={handleEditBoq} deleteMasterBoq={deleteMasterBoq} loadData={loadData} />}

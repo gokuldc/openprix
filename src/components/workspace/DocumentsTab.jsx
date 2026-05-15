@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Box, Typography, Paper, Button, Table, TableBody, TableCell,
     TableContainer, TableHead, TableRow, IconButton, TextField, MenuItem, Chip,
-    Accordion, AccordionSummary, AccordionDetails, Dialog, DialogTitle, DialogContent
+    Accordion, AccordionSummary, AccordionDetails, Dialog, DialogTitle, DialogContent, Autocomplete
 } from '@mui/material';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import LaunchIcon from '@mui/icons-material/Launch';
@@ -14,12 +14,23 @@ import ArchitectureIcon from '@mui/icons-material/Architecture';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import HistoryIcon from '@mui/icons-material/History';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
-import DownloadIcon from '@mui/icons-material/Download'; // 🔥 IMPORT DOWNLOAD ICON
+import DownloadIcon from '@mui/icons-material/Download';
+
+// 🔥 IMPORT REACT QUERY
+import { useProject } from '../../hooks/useQueries';
 
 export default function DocumentsTab({ projectId }) {
+    const { data: rawProject } = useProject(projectId);
+    const project = rawProject || {};
+
     const [docs, setDocs] = useState([]);
     const [name, setName] = useState("");
-    const [category, setCategory] = useState("Drawing / Blueprint");
+
+    // 🔥 DYNAMIC FOLDER TEMPLATE STATE
+    const [templateFolders, setTemplateFolders] = useState([
+        "01_Drawings", "02_Contracts", "03_Site_Photos", "04_Invoices", "05_Misc"
+    ]);
+    const [category, setCategory] = useState("01_Drawings");
 
     // Version History Modal State
     const [historyOpen, setHistoryOpen] = useState(false);
@@ -34,17 +45,24 @@ export default function DocumentsTab({ projectId }) {
         setDocs(data || []);
     };
 
-    useEffect(() => { loadDocs(); }, [projectId]);
+    useEffect(() => {
+        loadDocs();
+
+        // Fetch the global folder template from settings
+        window.api.db.getSettings('folder_template').then(res => {
+            if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+                setTemplateFolders(res.data);
+                setCategory(res.data[0]);
+            }
+        });
+    }, [projectId]);
 
     const categorizedDocs = useMemo(() => {
         const groups = {};
-
         docs.forEach(doc => {
             if (!groups[doc.category]) groups[doc.category] = {};
-
             const nameKey = (doc.name || "Untitled").trim().toLowerCase();
             if (!groups[doc.category][nameKey]) groups[doc.category][nameKey] = [];
-
             groups[doc.category][nameKey].push(doc);
         });
 
@@ -53,7 +71,6 @@ export default function DocumentsTab({ projectId }) {
                 groups[cat][nameKey].sort((a, b) => b.addedAt - a.addedAt);
             });
         });
-
         return groups;
     }, [docs]);
 
@@ -67,40 +84,47 @@ export default function DocumentsTab({ projectId }) {
         if (!file) return;
 
         const extension = file.name.split('.').pop().toLowerCase();
-        
         const reader = new FileReader();
+
         reader.onload = async (evt) => {
             const base64Data = evt.target.result;
-            
-            const res = await window.api.os.uploadFileWeb(file.name, base64Data, projectId);
-            
-            // restCall unwraps and returns data directly (the file path string) on success,
-            // or an object { success: false, error: '...' } on failure.
+            const finalCategory = uploadContext.category || category || "Uncategorized";
+
+            // 🔥 HOST SERVER ROUTING LOGIC
+            let targetFolder = undefined;
+            if (project?.isScaffolded && project?.scaffoldPath) {
+                // Ensure no double slashes when combining paths
+                const basePath = project.scaffoldPath.replace(/[/\\]$/, '');
+                targetFolder = `${basePath}/${finalCategory}`;
+            }
+
+            // Send to Rust backend with the specific target folder!
+            const res = await window.api.os.uploadFileWeb(file.name, base64Data, targetFolder);
+
             const uploadSucceeded = res && typeof res === 'string';
             if (uploadSucceeded) {
                 const finalName = uploadContext.name || name || file.name.replace(/\.[^/.]+$/, "");
-                const finalCategory = uploadContext.category || category;
 
                 const newDoc = {
                     id: crypto.randomUUID(),
                     projectId,
                     name: finalName,
                     category: finalCategory,
-                    filePath: res,  // res IS the path string
+                    filePath: res,  // 🔥 This is now just a text string pointing to the host machine!
                     fileType: extension,
                     addedAt: Date.now()
                 };
 
                 await window.api.db.saveProjectDocument(newDoc);
-                setName(""); 
+                setName("");
                 loadDocs();
             } else {
                 alert("File upload failed: " + (res?.error || "Unknown error"));
             }
-            
+
             if (fileInputRef.current) fileInputRef.current.value = null;
         };
-        
+
         reader.readAsDataURL(file);
     };
 
@@ -109,12 +133,11 @@ export default function DocumentsTab({ projectId }) {
         if (result && !result.success) alert("Could not open file. It may have been moved or deleted from the host system.");
     };
 
-    // 🔥 NEW: Save As / Download Logic
     const handleDownloadFile = (path, fileName) => {
-        const downloadUrl = `/api/download?path=${encodeURIComponent(path)}`;
+        const downloadUrl = `${window.api.os.getServerUrl ? window.api.os.getServerUrl() : ''}/api/os/download?path=${encodeURIComponent(path)}`;
         const a = document.createElement('a');
         a.href = downloadUrl;
-        a.download = fileName; // This forces the "Save As" dialog on Electron, and a download on Web
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -122,75 +145,70 @@ export default function DocumentsTab({ projectId }) {
 
     const handleDeleteDoc = async (id, isGroupDelete = false) => {
         const msg = isGroupDelete
-            ? "CRITICAL: Delete THIS ENTIRE DOCUMENT GROUP and all its versions?"
-            : "Remove this specific version? (The actual file remains on your disk)";
+            ? "CRITICAL: Delete THIS ENTIRE DOCUMENT GROUP and all its versions from the tracker? (The file remains on the host server)"
+            : "Remove this specific version? (The file remains on the host server)";
 
         if (window.confirm(msg)) {
             await window.api.db.deleteProjectDocument(id);
             loadDocs();
-            if (historyOpen) setHistoryOpen(false); 
+            if (historyOpen) setHistoryOpen(false);
         }
     };
 
     const getIcon = (type) => {
         if (['pdf'].includes(type)) return <PictureAsPdfIcon color="error" />;
-        if (['jpg', 'png', 'jpeg'].includes(type)) return <ImageIcon color="info" />;
+        if (['jpg', 'png', 'jpeg', 'webp'].includes(type)) return <ImageIcon color="info" />;
         if (['dwg', 'dxf'].includes(type)) return <ArchitectureIcon color="warning" />;
         return <DescriptionIcon />;
     };
 
-    const CATEGORY_OPTIONS = [
-        "Drawing / Blueprint",
-        "Legal / Contract",
-        "Site Photo",
-        "Supplier Invoice",
-        "Permit / Compliance",
-        "Technical Spec",
-        "Other"
-    ];
-
     return (
         <Box display="flex" flexDirection="column" gap={3}>
-            
             <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} />
 
-            {/* 🔥 MOBILE RESPONSIVE UPLOAD BAR */}
             <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
                 <Typography variant="subtitle2" fontWeight="bold" mb={2} sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'primary.main' }}>
                     // INITIALIZE_NEW_DOCUMENT_GROUP
                 </Typography>
                 <Box display="flex" flexDirection={{ xs: 'column', md: 'row' }} gap={2}>
-                    <TextField 
-                        fullWidth 
-                        size="small" 
-                        label="DOCUMENT MASTER NAME" 
-                        value={name} 
-                        onChange={e => setName(e.target.value)} 
-                        helperText="Leave blank to use the file's original name." 
+                    <TextField
+                        fullWidth
+                        size="small"
+                        label="DOCUMENT MASTER NAME"
+                        value={name}
+                        onChange={e => setName(e.target.value)}
+                        helperText="Leave blank to use the file's original name."
                     />
-                    <TextField 
-                        select 
-                        fullWidth 
-                        sx={{ minWidth: { md: 220 }, maxWidth: { md: 250 } }} 
-                        size="small" 
-                        label="CATEGORY" 
-                        value={category} 
-                        onChange={e => setCategory(e.target.value)}
-                    >
-                        {CATEGORY_OPTIONS.map(cat => <MenuItem key={cat} value={cat}>{cat}</MenuItem>)}
-                    </TextField>
-                    <Button 
-                        variant="contained" 
-                        startIcon={<FolderOpenIcon />} 
-                        onClick={() => triggerFileSelect()} 
-                        sx={{ borderRadius: 2, fontWeight: 'bold', height: 40, minWidth: { md: 220 }, whiteSpace: 'nowrap' }}
+
+                    {/* 🔥 DYNAMIC DIRECTORY SELECTOR */}
+                    <Autocomplete
+                        freeSolo
+                        options={templateFolders}
+                        value={category}
+                        onChange={(e, newVal) => setCategory(newVal || "Uncategorized")}
+                        onInputChange={(e, newVal) => setCategory(newVal || "Uncategorized")}
+                        sx={{ minWidth: { md: 220 }, maxWidth: { md: 300 } }}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                size="small"
+                                label={project?.isScaffolded ? "TARGET DIRECTORY" : "CATEGORY"}
+                                helperText={project?.isScaffolded ? "Will save to this host folder." : "Standard tagging."}
+                            />
+                        )}
+                    />
+
+                    <Button
+                        variant="contained"
+                        startIcon={<FolderOpenIcon />}
+                        onClick={() => triggerFileSelect()}
+                        sx={{ borderRadius: 2, fontWeight: 'bold', height: 40, minWidth: { md: 220 }, whiteSpace: 'nowrap', mt: { xs: 1, md: 0 } }}
                     >
                         SELECT & INITIALIZE
                     </Button>
                 </Box>
             </Paper>
 
-            {/* DOCUMENT CATEGORIES ACCORDIONS */}
             <Box>
                 {Object.keys(categorizedDocs).length === 0 ? (
                     <Paper sx={{ p: 5, textAlign: 'center', bgcolor: 'rgba(0,0,0,0.2)', border: '1px dashed rgba(255,255,255,0.1)' }}>
@@ -221,7 +239,7 @@ export default function DocumentsTab({ projectId }) {
                                         </TableHead>
                                         <TableBody>
                                             {Object.entries(docGroups).map(([nameKey, versions]) => {
-                                                const latestDoc = versions[0]; 
+                                                const latestDoc = versions[0];
                                                 const versionCount = versions.length;
 
                                                 return (
@@ -246,35 +264,11 @@ export default function DocumentsTab({ projectId }) {
                                                             {new Date(latestDoc.addedAt).toLocaleDateString()}
                                                         </TableCell>
                                                         <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                                                            {/* OPEN LATEST */}
-                                                            <IconButton size="small" color="primary" onClick={() => handleOpenFile(latestDoc.filePath)} title="Open Native Viewer">
-                                                                <LaunchIcon fontSize="small" />
-                                                            </IconButton>
-
-                                                            {/* 🔥 NEW: DOWNLOAD / SAVE AS */}
-                                                            <IconButton size="small" color="success" onClick={() => handleDownloadFile(latestDoc.filePath, `${latestDoc.name}.${latestDoc.fileType}`)} title="Save As / Download">
-                                                                <DownloadIcon fontSize="small" />
-                                                            </IconButton>
-
-                                                            {/* ADD REVISION */}
-                                                            <IconButton size="small" color="info" onClick={() => triggerFileSelect(latestDoc.name, latestDoc.category)} title="Upload New Revision">
-                                                                <UploadFileIcon fontSize="small" />
-                                                            </IconButton>
-
-                                                            {/* VIEW HISTORY */}
-                                                            <IconButton size="small" color="secondary" disabled={versionCount <= 1} onClick={() => { setSelectedDocGroup(versions); setHistoryOpen(true); }} title="View Version History">
-                                                                <HistoryIcon fontSize="small" />
-                                                            </IconButton>
-
-                                                            {/* DELETE ALL */}
-                                                            <IconButton size="small" color="error" onClick={() => {
-                                                                if (window.confirm("Delete this ENTIRE document group and all its versions?")) {
-                                                                    versions.forEach(v => window.api.db.deleteProjectDocument(v.id));
-                                                                    setTimeout(loadDocs, 500); 
-                                                                }
-                                                            }} title="Delete Document Group">
-                                                                <DeleteIcon fontSize="small" />
-                                                            </IconButton>
+                                                            <IconButton size="small" color="primary" onClick={() => handleOpenFile(latestDoc.filePath)} title="Open Native Viewer"><LaunchIcon fontSize="small" /></IconButton>
+                                                            <IconButton size="small" color="success" onClick={() => handleDownloadFile(latestDoc.filePath, `${latestDoc.name}.${latestDoc.fileType}`)} title="Save As / Download"><DownloadIcon fontSize="small" /></IconButton>
+                                                            <IconButton size="small" color="info" onClick={() => triggerFileSelect(latestDoc.name, latestDoc.category)} title="Upload New Revision"><UploadFileIcon fontSize="small" /></IconButton>
+                                                            <IconButton size="small" color="secondary" disabled={versionCount <= 1} onClick={() => { setSelectedDocGroup(versions); setHistoryOpen(true); }} title="View Version History"><HistoryIcon fontSize="small" /></IconButton>
+                                                            <IconButton size="small" color="error" onClick={() => handleDeleteDoc(latestDoc.id, true)} title="Delete Document Group"><DeleteIcon fontSize="small" /></IconButton>
                                                         </TableCell>
                                                     </TableRow>
                                                 );
@@ -288,7 +282,6 @@ export default function DocumentsTab({ projectId }) {
                 )}
             </Box>
 
-            {/* VERSION HISTORY MODAL */}
             <Dialog open={historyOpen} onClose={() => setHistoryOpen(false)} maxWidth="md" fullWidth PaperProps={{ sx: { bgcolor: '#0d1f3c', border: '1px solid', borderColor: 'divider' } }}>
                 <DialogTitle sx={{ fontFamily: "'JetBrains Mono', monospace", borderBottom: '1px solid rgba(255,255,255,0.1)', fontSize: { xs: '14px', sm: '18px' } }}>
                     VERSION_HISTORY: <span style={{ color: '#3b82f6' }}>{selectedDocGroup[0]?.name}</span>
@@ -308,7 +301,6 @@ export default function DocumentsTab({ projectId }) {
                                 {selectedDocGroup.map((doc, index) => {
                                     const vNum = selectedDocGroup.length - index;
                                     const isLatest = index === 0;
-
                                     return (
                                         <TableRow key={doc.id} sx={{ bgcolor: isLatest ? 'rgba(16, 185, 129, 0.05)' : 'transparent' }}>
                                             <TableCell>
@@ -321,11 +313,8 @@ export default function DocumentsTab({ projectId }) {
                                             <TableCell sx={{ fontSize: '12px', whiteSpace: 'nowrap' }}>{new Date(doc.addedAt).toLocaleString()}</TableCell>
                                             <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                                                 <IconButton size="small" color="primary" onClick={() => handleOpenFile(doc.filePath)} title="Open Viewer"><LaunchIcon fontSize="small" /></IconButton>
-                                                
-                                                {/* 🔥 NEW: DOWNLOAD OLD VERSIONS TOO */}
                                                 <IconButton size="small" color="success" onClick={() => handleDownloadFile(doc.filePath, `${doc.name}_v${vNum}.${doc.fileType}`)} title="Download this version"><DownloadIcon fontSize="small" /></IconButton>
-                                                
-                                                <IconButton size="small" color="error" onClick={() => handleDeleteDoc(doc.id, false)} title="Delete Version"><DeleteIcon fontSize="small" /></IconButton>
+                                                <IconButton size="small" color="error" onClick={() => handleDeleteDoc(doc.id, false)} title="Delete Version Tracker"><DeleteIcon fontSize="small" /></IconButton>
                                             </TableCell>
                                         </TableRow>
                                     );
@@ -335,7 +324,6 @@ export default function DocumentsTab({ projectId }) {
                     </TableContainer>
                 </DialogContent>
             </Dialog>
-
         </Box>
     );
 }

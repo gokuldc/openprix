@@ -124,7 +124,6 @@ const calculateLiveForecast = (tasks) => {
     return live;
 };
 
-// 🔥 NEAT STAFF ROW COMPONENT (Now fully decoupled from 'project')
 const StaffRow = ({ staffId, staff, permissions, permissionMap, updateProject, hasClearance, handleRemoveStaff }) => {
     const [open, setOpen] = useState(false);
     const isL5 = staff.accessLevel >= 5;
@@ -132,7 +131,6 @@ const StaffRow = ({ staffId, staff, permissions, permissionMap, updateProject, h
 
     const handleToggle = (tabId, isChecked) => {
         const nextPerms = isChecked ? [...permissions, tabId] : permissions.filter(t => t !== tabId);
-        // Uses the passed permissionMap so it doesn't need to read 'project'
         const newMap = { ...permissionMap, [staffId]: nextPerms };
         updateProject('assignedStaff', JSON.stringify(newMap));
     };
@@ -221,7 +219,6 @@ export default function ProjectDetailsTab({ project, updateProject, regions, res
 
     const [selectedNewMember, setSelectedNewMember] = useState("");
 
-    // 🔥 1. SAFE PARSING ENGINE
     const { permissionMap, assignedIdsArray } = useMemo(() => {
         const raw = project?.assignedStaff || '[]';
         try {
@@ -394,26 +391,39 @@ export default function ProjectDetailsTab({ project, updateProject, regions, res
             .replace(/\{\{?CLIENT\}\}?/ig, safeStr(localProject?.clientName, 'No Client'));
     };
 
+    // 🔥 FIXED: SCAFFOLD LOGIC
     const handleScaffold = async () => {
         if (!settings.scaffoldRoot) return alert("Please configure the Scaffold Root in Company Settings first.");
         if (!window.api?.os?.scaffoldProject) return alert("Scaffolding is only supported on the Desktop Host App.");
 
         try {
-            const res = await window.api.os.scaffoldProject({
-                root: settings.scaffoldRoot,
-                subPath: getExpectedSubPath(),
-                folders: (settings.templateFolders || []).toString()
-            });
+            // 🔥 FORCE PARSE THE FOLDERS INTO A STRICT ARRAY FOR RUST
+            let safeFolders = [];
+            if (Array.isArray(settings.templateFolders)) {
+                safeFolders = settings.templateFolders;
+            } else if (typeof settings.templateFolders === 'string') {
+                safeFolders = settings.templateFolders.split(',').map(f => f.trim()).filter(Boolean);
+            }
 
-            if (res.success) {
+            const payload = {
+                rootPath: String(settings.scaffoldRoot).trim(),
+                projectFolderName: String(getExpectedSubPath()).trim(),
+                templateFolders: safeFolders
+            };
+
+            const res = await window.api.os.scaffoldProject(payload);
+
+            if (res && res.success) {
                 await updateProject('isScaffolded', 1);
                 await updateProject('isManuallyLinked', 0);
-                await updateProject('scaffoldPath', res.path);
-                alert(res.exists ? "Linked to existing directory successfully!" : "Workspace scaffolded successfully!");
+                await updateProject('scaffoldPath', res.data);
+                alert("Workspace scaffolded successfully!");
             } else {
-                alert("Failed to scaffold: " + res.error);
+                alert("Failed to scaffold: " + (res?.error || "Unknown error"));
             }
-        } catch (err) { alert("Error: " + err.message); }
+        } catch (err) {
+            alert("Error: " + err.message);
+        }
     };
 
     const handleLinkExisting = async () => {
@@ -439,12 +449,13 @@ export default function ProjectDetailsTab({ project, updateProject, regions, res
         if (!project?.isScaffolded || !project?.scaffoldPath || !settings.scaffoldRoot || project?.isManuallyLinked) return;
         if (!window.api?.os?.renameProjectFolder) return;
 
+        // Future-proofing for when we build renameProjectFolder in Rust
         const res = await window.api.os.renameProjectFolder({
-            root: settings.scaffoldRoot,
+            rootPath: settings.scaffoldRoot,
             oldPath: project.scaffoldPath,
-            newSubPath: getExpectedSubPath()
+            newFolderName: getExpectedSubPath()
         });
-        if (res.success) await updateProject('scaffoldPath', res.newPath);
+        if (res.success) await updateProject('scaffoldPath', res.data);
     };
 
     const clientList = (crmContacts || []).filter(c => c.type === 'Client');

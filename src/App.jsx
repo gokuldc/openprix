@@ -15,7 +15,7 @@ import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import MenuIcon from '@mui/icons-material/Menu';
 import HomeIcon from '@mui/icons-material/Home';
 import FolderSpecialIcon from '@mui/icons-material/FolderSpecial'; // Used for Archive
-import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder'; // 🔥 New Icon for Project Creation
+import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder';
 import AutoStoriesIcon from '@mui/icons-material/AutoStories';
 import StorageIcon from '@mui/icons-material/Storage';
 import RouterIcon from '@mui/icons-material/Router';
@@ -23,6 +23,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import LogoutIcon from '@mui/icons-material/Logout';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
@@ -38,6 +39,16 @@ import ProjectArchive from './components/ProjectArchive';
 import DailyLogs from './components/DailyLogs';
 import ServerManager from './components/ServerManager';
 import CompanySettings from './components/CompanySettings';
+
+// client for React Query
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: {
+            refetchOnWindowFocus: false, // Prevents aggressive refetching when switching windows
+            staleTime: 1000 * 60 * 5, // Data stays "fresh" for 5 minutes
+        },
+    },
+});
 
 // GATEKEEPER
 function Gatekeeper({ children }) {
@@ -258,30 +269,32 @@ export default function App() {
     };
 
     return (
-        <SettingsProvider>
-            <AuthProvider>
-                <ThemeProvider theme={theme}>
-                    <CssBaseline />
-                    <Gatekeeper>
-                        <AppContent
-                            isTauri={isTauri}
-                            mode={mode} theme={theme} toggleTheme={toggleTheme}
-                            currentView={currentView} setCurrentView={setCurrentView}
-                            activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId}
-                            aboutOpen={aboutOpen} setAboutOpen={setAboutOpen}
-                            sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen}
-                            globalChatOpen={globalChatOpen} setGlobalChatOpen={setGlobalChatOpen}
-                            orgStaff={orgStaff}
-                            syncModalOpen={syncModalOpen} setSyncModalOpen={setSyncModalOpen}
-                            syncUrl={syncUrl} setSyncUrl={setSyncUrl} handleSaveSyncUrl={handleSaveSyncUrl}
-                            isProfileOpen={isProfileOpen} setIsProfileOpen={setIsProfileOpen}
-                            profileData={profileData} setProfileData={setProfileData}
-                            generateSecureId={generateSecureId}
-                        />
-                    </Gatekeeper>
-                </ThemeProvider>
-            </AuthProvider>
-        </SettingsProvider>
+        <QueryClientProvider client={queryClient}>
+            <SettingsProvider>
+                <AuthProvider>
+                    <ThemeProvider theme={theme}>
+                        <CssBaseline />
+                        <Gatekeeper>
+                            <AppContent
+                                isTauri={isTauri}
+                                mode={mode} theme={theme} toggleTheme={toggleTheme}
+                                currentView={currentView} setCurrentView={setCurrentView}
+                                activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId}
+                                aboutOpen={aboutOpen} setAboutOpen={setAboutOpen}
+                                sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen}
+                                globalChatOpen={globalChatOpen} setGlobalChatOpen={setGlobalChatOpen}
+                                orgStaff={orgStaff}
+                                syncModalOpen={syncModalOpen} setSyncModalOpen={setSyncModalOpen}
+                                syncUrl={syncUrl} setSyncUrl={setSyncUrl} handleSaveSyncUrl={handleSaveSyncUrl}
+                                isProfileOpen={isProfileOpen} setIsProfileOpen={setIsProfileOpen}
+                                profileData={profileData} setProfileData={setProfileData}
+                                generateSecureId={generateSecureId}
+                            />
+                        </Gatekeeper>
+                    </ThemeProvider>
+                </AuthProvider>
+            </SettingsProvider>
+        </QueryClientProvider >
     );
 }
 

@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import ReactDOM from 'react-dom'; // 🔥 REQUIRED FOR PORTALS
 import {
     Box, Paper, Typography, Table, TableBody, TableCell, TableContainer,
     TableHead, TableRow, TextField, Button, Autocomplete, IconButton, MenuItem, Grid
@@ -14,91 +15,81 @@ import TimelineIcon from '@mui/icons-material/Timeline';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
+// 🔥 IMPORT REACT QUERY HOOKS & ENGINE & DND
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import { useProject, useProjectBoqs, useUpdateProject } from '../../hooks/useQueries';
+import { calculateLiveForecast } from '../../engines/scheduleEngine';
+
 const STICKY_BG = '#0b172d';
 
-// 🔥 ADVANCED CPM FORECASTING ENGINE
-const calculateLiveForecast = (tasks) => {
-    let live = tasks.map(t => {
-        const start = new Date(t.startDate);
-        const end = new Date(t.endDate);
-        const duration = Math.max(1, Math.ceil((end - start) / 86400000) + 1);
-        return {
-            ...t,
-            plannedDuration: duration,
-            forecastStart: t.actualStart || t.startDate,
-            forecastEnd: t.actualEnd || null
-        };
-    });
-
-    // Initialize missing ends
-    live = live.map(t => {
-        if (!t.forecastEnd) {
-            const fs = new Date(t.forecastStart);
-            if (t.type !== 'Milestone') fs.setDate(fs.getDate() + t.plannedDuration - 1);
-            t.forecastEnd = fs.toISOString().split('T')[0];
-        }
-        return t;
-    });
-
+// ============================================================================
+// 🧠 PURE FUNCTIONS
+// ============================================================================
+const cascadeDates = (taskList) => {
     let changed = true;
-    let iters = 0;
-    while (changed && iters < 20) {
+    let iterations = 0;
+    let currentTasks = [...taskList];
+
+    while (changed && iterations < 10) {
         changed = false;
-        iters++;
-        live = live.map(task => {
-            let newStart = new Date(task.forecastStart);
+        iterations++;
 
-            // Domino Effect: Push start dates based on predecessor's FORECASTED end date
-            if (!task.actualStart && task.dependency && task.dependency.taskId) {
-                const pred = live.find(t => t.id === task.dependency.taskId);
-                if (pred && pred.forecastEnd) {
-                    const predStart = new Date(pred.forecastStart);
-                    const predEnd = new Date(pred.forecastEnd);
-                    const lag = Number(task.dependency.lag) || 0;
-                    const isMilestone = task.type === 'Milestone';
+        currentTasks = currentTasks.map(task => {
+            if (!task.dependency || !task.dependency.taskId) return task;
+            const pred = currentTasks.find(t => t.id === task.dependency.taskId);
+            if (!pred) return task;
 
-                    if (task.dependency.type === 'FS') {
-                        newStart = new Date(predEnd);
-                        newStart.setDate(newStart.getDate() + (isMilestone ? 0 : 1) + lag);
-                    } else if (task.dependency.type === 'SS') {
-                        newStart = new Date(predStart);
-                        newStart.setDate(newStart.getDate() + lag);
-                    } else if (task.dependency.type === 'FF') {
-                        const tempEnd = new Date(predEnd);
-                        tempEnd.setDate(tempEnd.getDate() + lag);
-                        newStart = new Date(tempEnd);
-                        if (!isMilestone) newStart.setDate(newStart.getDate() - task.plannedDuration + 1);
-                    } else if (task.dependency.type === 'SF') {
-                        const tempEnd = new Date(predStart);
-                        tempEnd.setDate(tempEnd.getDate() + lag);
-                        newStart = new Date(tempEnd);
-                        if (!isMilestone) newStart.setDate(newStart.getDate() - task.plannedDuration + 1);
-                    }
-                }
+            const newStart = new Date(task.startDate);
+            const newEnd = new Date(task.endDate);
+            const duration = Math.max(0, (newEnd - newStart) / 86400000);
+            const isMilestone = task.type === 'Milestone';
+            const lag = Number(task.dependency.lag) || 0;
+
+            const predStart = new Date(pred.startDate);
+            const predEnd = new Date(pred.endDate);
+
+            let expectedStart = new Date(newStart);
+            let expectedEnd = new Date(newEnd);
+
+            if (task.dependency.type === 'FS') {
+                expectedStart = new Date(predEnd);
+                expectedStart.setDate(expectedStart.getDate() + (isMilestone ? 0 : 1) + lag);
+                expectedEnd = new Date(expectedStart);
+                if (!isMilestone) expectedEnd.setDate(expectedEnd.getDate() + duration);
+            } else if (task.dependency.type === 'SS') {
+                expectedStart = new Date(predStart);
+                expectedStart.setDate(expectedStart.getDate() + lag);
+                expectedEnd = new Date(expectedStart);
+                if (!isMilestone) expectedEnd.setDate(expectedEnd.getDate() + duration);
+            } else if (task.dependency.type === 'FF') {
+                expectedEnd = new Date(predEnd);
+                expectedEnd.setDate(expectedEnd.getDate() + lag);
+                expectedStart = new Date(expectedEnd);
+                if (!isMilestone) expectedStart.setDate(expectedStart.getDate() - duration);
+            } else if (task.dependency.type === 'SF') {
+                expectedEnd = new Date(predStart);
+                expectedEnd.setDate(expectedEnd.getDate() + lag);
+                expectedStart = new Date(expectedEnd);
+                if (!isMilestone) expectedStart.setDate(expectedStart.getDate() - duration);
             }
 
-            // Calculate new end date based on new pushed start date
-            let newEnd = task.actualEnd ? new Date(task.actualEnd) : new Date(newStart);
-            if (!task.actualEnd && task.type !== 'Milestone') {
-                newEnd.setDate(newStart.getDate() + task.plannedDuration - 1);
-            }
+            const expectedStartStr = expectedStart.toISOString().split('T')[0];
+            const expectedEndStr = expectedEnd.toISOString().split('T')[0];
 
-            const startStr = newStart.toISOString().split('T')[0];
-            const endStr = newEnd.toISOString().split('T')[0];
-
-            if (task.forecastStart !== startStr || task.forecastEnd !== endStr) {
+            if (task.startDate !== expectedStartStr || task.endDate !== expectedEndStr) {
                 changed = true;
-                return { ...task, forecastStart: startStr, forecastEnd: endStr };
+                return { ...task, startDate: expectedStartStr, endDate: expectedEndStr };
             }
             return task;
         });
     }
-    return live;
+    return currentTasks;
 };
 
-export default function GanttScheduleTab({ project, projectBoqItems, updateProject, loadData }) {
-    const tasks = Array.isArray(project?.ganttTasks) ? project.ganttTasks : [];
-
+// ============================================================================
+// 🧩 SUB-COMPONENT 1: TASK CREATION FORM
+// ============================================================================
+const GanttTaskForm = ({ tasks, liveTasks, availablePhases, saveTasks }) => {
     const [taskName, setTaskName] = useState("");
     const [taskType, setTaskType] = useState("Task");
     const [activePhase, setActivePhase] = useState("General");
@@ -107,91 +98,6 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
     const [predecessorId, setPredecessorId] = useState("");
     const [dependencyType, setDependencyType] = useState("FS");
     const [dependencyLag, setDependencyLag] = useState(0);
-
-    const [zoomLevel, setZoomLevel] = useState(1);
-    const [draggedId, setDraggedId] = useState(null);
-
-    const dependencyOptions = [
-        { value: "FS", label: "Finish-to-Start (FS)" },
-        { value: "SS", label: "Start-to-Start (SS)" },
-        { value: "FF", label: "Finish-to-Finish (FF)" },
-        { value: "SF", label: "Start-to-Finish (SF)" }
-    ];
-
-    const availablePhases = useMemo(() => {
-        const phases = new Set((projectBoqItems || []).map(item => item.phase).filter(Boolean));
-        tasks.forEach(t => { if (t.phase) phases.add(t.phase); });
-        if (phases.size === 0) return ["Substructure", "Superstructure", "Finishing", "MEP", "General"];
-        return Array.from(phases);
-    }, [projectBoqItems, tasks]);
-
-    // 🔥 FIX: cascadeDates now STRICTLY sets the Baseline plan. It ignores actuals.
-    const cascadeDates = (taskList) => {
-        let changed = true;
-        let iterations = 0;
-        let currentTasks = [...taskList];
-
-        while (changed && iterations < 10) {
-            changed = false;
-            iterations++;
-
-            currentTasks = currentTasks.map(task => {
-                if (!task.dependency || !task.dependency.taskId) return task;
-                const pred = currentTasks.find(t => t.id === task.dependency.taskId);
-                if (!pred) return task;
-
-                const newStart = new Date(task.startDate);
-                const newEnd = new Date(task.endDate);
-                const duration = Math.max(0, (newEnd - newStart) / 86400000);
-                const isMilestone = task.type === 'Milestone';
-                const lag = Number(task.dependency.lag) || 0;
-
-                const predStart = new Date(pred.startDate);
-                const predEnd = new Date(pred.endDate);
-
-                let expectedStart = new Date(newStart);
-                let expectedEnd = new Date(newEnd);
-
-                if (task.dependency.type === 'FS') {
-                    expectedStart = new Date(predEnd);
-                    expectedStart.setDate(expectedStart.getDate() + (isMilestone ? 0 : 1) + lag);
-                    expectedEnd = new Date(expectedStart);
-                    if (!isMilestone) expectedEnd.setDate(expectedEnd.getDate() + duration);
-                } else if (task.dependency.type === 'SS') {
-                    expectedStart = new Date(predStart);
-                    expectedStart.setDate(expectedStart.getDate() + lag);
-                    expectedEnd = new Date(expectedStart);
-                    if (!isMilestone) expectedEnd.setDate(expectedEnd.getDate() + duration);
-                } else if (task.dependency.type === 'FF') {
-                    expectedEnd = new Date(predEnd);
-                    expectedEnd.setDate(expectedEnd.getDate() + lag);
-                    expectedStart = new Date(expectedEnd);
-                    if (!isMilestone) expectedStart.setDate(expectedStart.getDate() - duration);
-                } else if (task.dependency.type === 'SF') {
-                    expectedEnd = new Date(predStart);
-                    expectedEnd.setDate(expectedEnd.getDate() + lag);
-                    expectedStart = new Date(expectedEnd);
-                    if (!isMilestone) expectedStart.setDate(expectedStart.getDate() - duration);
-                }
-
-                const expectedStartStr = expectedStart.toISOString().split('T')[0];
-                const expectedEndStr = expectedEnd.toISOString().split('T')[0];
-
-                if (task.startDate !== expectedStartStr || task.endDate !== expectedEndStr) {
-                    changed = true;
-                    return { ...task, startDate: expectedStartStr, endDate: expectedEndStr };
-                }
-                return task;
-            });
-        }
-        return currentTasks;
-    };
-
-    const saveTasks = async (newTasks) => {
-        const scheduledTasks = cascadeDates(newTasks);
-        await updateProject("ganttTasks", scheduledTasks);
-        if (loadData) loadData();
-    };
 
     const addTask = async () => {
         if (!taskName || !startDate) return alert("Task Name and Start date are required.");
@@ -209,13 +115,138 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
         setTaskName(""); setPredecessorId(""); setDependencyLag(0);
     };
 
-    const deleteTask = async (id) => {
-        const updatedTasks = tasks.filter(t => t.id !== id).map(t => {
-            if (t.dependency && t.dependency.taskId === id) return { ...t, dependency: null };
-            return t;
-        });
-        await saveTasks(updatedTasks);
-    };
+    return (
+        <Paper sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
+            <Typography variant="subtitle2" fontWeight="bold" mb={2} sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.5px', fontSize: '14px' }}>
+                ADD_SCHEDULE_ITEM
+            </Typography>
+            <Grid container spacing={2} alignItems="flex-start">
+                <Grid item xs={12} md={2}>
+                    <TextField select fullWidth size="small" label="TYPE" value={taskType} onChange={e => setTaskType(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}>
+                        <MenuItem value="Task" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>Task</MenuItem>
+                        <MenuItem value="Milestone" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>Milestone</MenuItem>
+                    </TextField>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                    <TextField fullWidth size="small" label="NAME" value={taskName} onChange={e => setTaskName(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                    <Autocomplete freeSolo fullWidth options={availablePhases} value={activePhase} onChange={(e, newVal) => setActivePhase(newVal || "General")} onInputChange={(e, newVal) => setActivePhase(newVal || "General")} renderInput={(params) => <TextField {...params} size="small" label="PHASE" InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ ...params.InputProps, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />} />
+                </Grid>
+                <Grid item xs={6} md={2}>
+                    <TextField type="date" fullWidth size="small" label="BASELINE START" value={startDate} onChange={e => setStartDate(e.target.value)} InputLabelProps={{ shrink: true, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                </Grid>
+                <Grid item xs={6} md={2}>
+                    <TextField type="date" fullWidth size="small" label="BASELINE END" value={taskType === "Milestone" ? startDate : endDate} onChange={e => setEndDate(e.target.value)} disabled={taskType === "Milestone"} inputProps={{ min: startDate }} InputLabelProps={{ shrink: true, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                </Grid>
+                <Grid item xs={12} md={3}>
+                    <TextField select fullWidth size="small" label="PREDECESSOR" value={predecessorId} onChange={e => setPredecessorId(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}>
+                        <MenuItem value="">-- NONE --</MenuItem>
+                        {liveTasks.map(t => <MenuItem key={t.id} value={t.id} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', whiteSpace: 'normal' }}>{t.name}</MenuItem>)}
+                    </TextField>
+                </Grid>
+                <Grid item xs={6} md={2}>
+                    <TextField select fullWidth size="small" label="DEP TYPE" value={dependencyType} onChange={e => setDependencyType(e.target.value)} disabled={!predecessorId} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}>
+                        {[{ value: "FS", label: "Finish-to-Start (FS)" }, { value: "SS", label: "Start-to-Start (SS)" }, { value: "FF", label: "Finish-to-Finish (FF)" }, { value: "SF", label: "Start-to-Finish (SF)" }].map(opt => <MenuItem key={opt.value} value={opt.value} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{opt.value}</MenuItem>)}
+                    </TextField>
+                </Grid>
+                <Grid item xs={6} md={1}>
+                    <TextField type="number" fullWidth size="small" label="LAG" value={dependencyLag} onChange={e => setDependencyLag(e.target.value)} disabled={!predecessorId} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                </Grid>
+                <Grid item xs={12} md={2}>
+                    <Button fullWidth variant="contained" color="primary" onClick={addTask} startIcon={<AddIcon />} sx={{ height: 40, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: '12px' }}>ADD</Button>
+                </Grid>
+            </Grid>
+        </Paper>
+    );
+};
+
+// ============================================================================
+// 🧩 SUB-COMPONENT 2.1: THE INDIVIDUAL ROW (WITH PORTAL)
+// ============================================================================
+const GanttWbsTableRow = ({ task, provided, snapshot, liveTasks, updateTaskInline, updateDependency, deleteTask }) => {
+    const isMilestone = task.type === "Milestone";
+    const isStartLocked = task.dependency && (task.dependency.type === 'FS' || task.dependency.type === 'SS');
+    const isEndLocked = isMilestone || (task.dependency && (task.dependency.type === 'FF' || task.dependency.type === 'SF'));
+    const nativeSelectStyle = { background: 'transparent', color: 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', outline: 'none', borderBottom: '1px dotted rgba(255,255,255,0.3)', cursor: 'pointer', width: '100%' };
+
+    const usePortal = snapshot.isDragging;
+
+    const rowContent = (
+        <TableRow
+            ref={provided.innerRef}
+            {...provided.draggableProps}
+            style={{
+                ...provided.draggableProps.style,
+                // 🔥 CRITICAL: Force table layout when in portal to prevent cell collapse
+                display: usePortal ? 'table' : 'table-row',
+                tableLayout: 'fixed',
+                width: usePortal ? '100%' : 'auto',
+                maxWidth: usePortal ? '90vw' : 'none',
+                zIndex: 9999
+            }}
+            sx={{
+                bgcolor: snapshot.isDragging ? '#1a2e4c' : 'inherit',
+                boxShadow: snapshot.isDragging ? '0 15px 30px rgba(0,0,0,0.8)' : 'none',
+                transition: 'background-color 0.2s',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
+            }}
+        >
+            {/* 🔥 FIXED WIDTHS: Prevents the "Twitch" during drag start */}
+            <TableCell {...provided.dragHandleProps} sx={{ width: 40, p: 0, textAlign: 'center', cursor: 'grab' }}>
+                <DragIndicatorIcon color="action" fontSize="small" sx={{ verticalAlign: 'middle' }} />
+            </TableCell>
+            <TableCell sx={{ width: 300 }}>
+                <Box display="flex" alignItems="center">
+                    <input type="text" value={task.name} onChange={e => updateTaskInline(task.id, "name", e.target.value)} style={{ background: 'transparent', color: 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', fontWeight: 'bold', width: '100%', outline: 'none' }} />
+                    {isMilestone && <Typography component="span" color="warning.main" ml={0.5}>◆</Typography>}
+                </Box>
+            </TableCell>
+            <TableCell sx={{ width: 140 }}>
+                <input type="date" value={task.startDate} onChange={e => updateTaskInline(task.id, "startDate", e.target.value)} disabled={isStartLocked} style={{ background: 'transparent', color: isStartLocked ? 'gray' : 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', width: '100%', outline: 'none' }} />
+            </TableCell>
+            <TableCell sx={{ width: 140 }}>
+                <input type="date" value={task.endDate} onChange={e => updateTaskInline(task.id, "endDate", e.target.value)} disabled={isEndLocked} style={{ background: 'transparent', color: isEndLocked ? 'gray' : 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', width: '100%', outline: 'none' }} />
+            </TableCell>
+            <TableCell sx={{ width: 220, whiteSpace: 'nowrap' }}>
+                <Box display="flex" gap={1}>
+                    <select value={task.dependency?.taskId || ""} onChange={e => updateDependency(task.id, e.target.value, task.dependency?.type || "FS", task.dependency?.lag || 0)} style={{ ...nativeSelectStyle, width: '110px' }}>
+                        <option value="" style={{ color: 'black' }}>- None -</option>
+                        {liveTasks.filter(t => t.id !== task.id).map(t => <option key={t.id} value={t.id} style={{ color: 'black' }}>{t.name}</option>)}
+                    </select>
+                    <select value={task.dependency?.type || "FS"} onChange={e => updateDependency(task.id, task.dependency?.taskId, e.target.value, task.dependency?.lag || 0)} disabled={!task.dependency?.taskId} style={{ ...nativeSelectStyle, width: '40px', opacity: !task.dependency?.taskId ? 0.3 : 1 }}>
+                        <option value="FS" style={{ color: 'black' }}>FS</option><option value="SS" style={{ color: 'black' }}>SS</option>
+                        <option value="FF" style={{ color: 'black' }}>FF</option><option value="SF" style={{ color: 'black' }}>SF</option>
+                    </select>
+                    <input type="number" value={task.dependency?.lag || 0} onChange={e => updateDependency(task.id, task.dependency?.taskId, task.dependency?.type || "FS", e.target.value)} disabled={!task.dependency?.taskId} style={{ ...nativeSelectStyle, width: '40px', opacity: !task.dependency?.taskId ? 0.3 : 1 }} />
+                </Box>
+            </TableCell>
+            <TableCell sx={{ width: 140 }}>
+                <select value={task.status || "Not Started"} onChange={e => updateTaskInline(task.id, "status", e.target.value)} style={{ ...nativeSelectStyle }}>
+                    <option value="Not Started" style={{ color: 'black' }}>Not Started</option>
+                    <option value="Pending Procurement" style={{ color: 'black' }}>Procurement</option>
+                    <option value="In Progress" style={{ color: 'black' }}>In Progress</option>
+                    <option value="Quality Check" style={{ color: 'black' }}>QA Check</option>
+                    <option value="Completed" style={{ color: 'black' }}>Completed</option>
+                </select>
+            </TableCell>
+            <TableCell align="center" sx={{ width: 60 }}>
+                <IconButton size="small" color="error" onClick={() => deleteTask(task.id)}><DeleteIcon fontSize="small" /></IconButton>
+            </TableCell>
+        </TableRow>
+    );
+
+    // 🔥 TELEPORT TO BODY: Solves the mouse offset / clipping issue
+    if (usePortal) {
+        return ReactDOM.createPortal(rowContent, document.body);
+    }
+    return rowContent;
+};
+
+// ============================================================================
+// 🧩 SUB-COMPONENT 2: THE WBS DATA TABLE 
+// ============================================================================
+const GanttWbsTable = ({ tasks, liveTasks, groupedTasks, saveTasks }) => {
 
     const updateTaskInline = async (id, field, value) => {
         const updatedTasks = tasks.map(t => {
@@ -241,26 +272,119 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
         await saveTasks(updatedTasks);
     };
 
-    const handleDragStart = (e, id) => { setDraggedId(id); e.dataTransfer.effectAllowed = "move"; };
-    const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; };
-    const handleDrop = async (e, targetId) => {
-        e.preventDefault();
-        if (!draggedId || draggedId === targetId) return;
-        const items = [...tasks];
-        const draggedIdx = items.findIndex(i => i.id === draggedId);
-        const targetIdx = items.findIndex(i => i.id === targetId);
-        if (draggedIdx === -1 || targetIdx === -1) return;
-        const [draggedItem] = items.splice(draggedIdx, 1);
-        draggedItem.phase = items[targetIdx > draggedIdx ? targetIdx - 1 : targetIdx]?.phase || items[targetIdx]?.phase || "General";
-        items.splice(targetIdx, 0, draggedItem);
-        await saveTasks(items);
-        setDraggedId(null);
+    const deleteTask = async (id) => {
+        const updatedTasks = tasks.filter(t => t.id !== id).map(t => {
+            if (t.dependency && t.dependency.taskId === id) return { ...t, dependency: null };
+            return t;
+        });
+        await saveTasks(updatedTasks);
     };
 
-    // 🔥 GENERATE LIVE FORECAST
-    const liveTasks = useMemo(() => calculateLiveForecast(tasks), [tasks]);
+    // 🔥 FLAT LIST DND HANDLER
+    const handleOnDragEnd = async (result) => {
+        const { source, destination, draggableId } = result;
+        if (!destination) return;
+        if (source.droppableId === destination.droppableId && source.index === destination.index) return;
 
-    // 🔥 TIMELINE VISUALIZATION MATH (Calculates bounds based on BOTH baseline and forecast)
+        const movedTask = tasks.find(t => String(t.id) === draggableId);
+        if (!movedTask) return;
+
+        const remainingTasks = tasks.filter(t => String(t.id) !== draggableId);
+        const destPhaseTasks = groupedTasks[destination.droppableId] || [];
+        const targetTaskInPhase = destPhaseTasks.filter(t => String(t.id) !== draggableId)[destination.index];
+
+        let insertIndex = remainingTasks.length;
+        if (targetTaskInPhase) {
+            insertIndex = remainingTasks.findIndex(t => t.id === targetTaskInPhase.id);
+        } else {
+            const lastTaskInPhase = destPhaseTasks.filter(t => String(t.id) !== draggableId).pop();
+            if (lastTaskInPhase) {
+                insertIndex = remainingTasks.findIndex(t => t.id === lastTaskInPhase.id) + 1;
+            } else {
+                insertIndex = 0;
+            }
+        }
+
+        movedTask.phase = destination.droppableId;
+        remainingTasks.splice(insertIndex, 0, movedTask);
+        await saveTasks(remainingTasks);
+    };
+
+    return (
+        <Paper elevation={0} sx={{ p: { xs: 1, sm: 3 }, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} px={{ xs: 1, sm: 0 }}>
+                <Typography variant="subtitle2" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AccountTreeIcon color="primary" fontSize="small" /> WORK BREAKDOWN STRUCTURE (WBS)
+                </Typography>
+            </Box>
+
+            <DragDropContext onDragEnd={handleOnDragEnd}>
+                <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, overflowX: 'auto' }}>
+                    <Table size="small" sx={{ minWidth: 1040, tableLayout: 'fixed' }}>
+                        <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.3)' }}>
+                            <TableRow>
+                                {/* 🔥 MATCHING EXPLICIT WIDTHS FOR HEADERS */}
+                                <TableCell sx={{ width: 40 }}></TableCell>
+                                <TableCell sx={{ width: 300, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>TASK NAME</TableCell>
+                                <TableCell sx={{ width: 140, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'text.secondary' }}>BASELINE START</TableCell>
+                                <TableCell sx={{ width: 140, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'text.secondary' }}>BASELINE END</TableCell>
+                                <TableCell sx={{ width: 220, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>DEPENDENCY</TableCell>
+                                <TableCell sx={{ width: 140, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>STATUS</TableCell>
+                                <TableCell align="center" sx={{ width: 60 }}></TableCell>
+                            </TableRow>
+                        </TableHead>
+
+                        {Object.keys(groupedTasks).length > 0 ? (
+                            Object.entries(groupedTasks).map(([phaseName, phaseTasks]) => (
+                                <React.Fragment key={`wbs-phase-${phaseName}`}>
+                                    {/* 🔥 ISOLATED NON-DRAGGABLE HEADER */}
+                                    <TableBody>
+                                        <TableRow sx={{ bgcolor: 'rgba(59, 130, 246, 0.05)' }}>
+                                            <TableCell colSpan={7} sx={{ py: 1.5, borderBottom: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                                                <Typography variant="subtitle2" color="primary.main" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px' }}>◲ PHASE: {phaseName.toUpperCase()}</Typography>
+                                            </TableCell>
+                                        </TableRow>
+                                    </TableBody>
+
+                                    {/* 🔥 DROPPABLE PHASE BODY */}
+                                    <Droppable droppableId={phaseName}>
+                                        {(provided) => (
+                                            <TableBody ref={provided.innerRef} {...provided.droppableProps}>
+                                                {phaseTasks.map((task, index) => (
+                                                    <Draggable key={String(task.id)} draggableId={String(task.id)} index={index}>
+                                                        {(provided, snapshot) => (
+                                                            <GanttWbsTableRow
+                                                                task={task} provided={provided} snapshot={snapshot}
+                                                                liveTasks={liveTasks} updateTaskInline={updateTaskInline}
+                                                                updateDependency={updateDependency} deleteTask={deleteTask}
+                                                            />
+                                                        )}
+                                                    </Draggable>
+                                                ))}
+                                                {provided.placeholder}
+                                            </TableBody>
+                                        )}
+                                    </Droppable>
+                                </React.Fragment>
+                            ))
+                        ) : (
+                            <TableBody>
+                                <TableRow><TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>NO_TASKS_SCHEDULED</TableCell></TableRow>
+                            </TableBody>
+                        )}
+                    </Table>
+                </TableContainer>
+            </DragDropContext>
+        </Paper>
+    );
+};
+
+// ============================================================================
+// 🧩 SUB-COMPONENT 3: THE LIVE FORECAST GANTT MATRIX (Unchanged)
+// ============================================================================
+const GanttMatrix = ({ projectName, tasks, liveTasks, groupedTasks }) => {
+    const [zoomLevel, setZoomLevel] = useState(1);
+
     const { minDate, maxDate, totalDays } = useMemo(() => {
         if (liveTasks.length === 0) return { minDate: null, maxDate: null, totalDays: 0 };
         let min = new Date(liveTasks[0].startDate);
@@ -291,7 +415,7 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
             case 'In Progress': return '#3b82f6';
             case 'Pending Procurement': return '#f59e0b';
             case 'Quality Check': return '#9c27b0';
-            default: return '#6b7280'; // Gray for Not Started Forecast
+            default: return '#6b7280';
         }
     };
 
@@ -325,16 +449,6 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
         }
         return { left: `${Math.max(0, (startOffsetDays / totalDays) * 100)}%`, width: `${Math.min(100, (durationDays / totalDays) * 100)}%`, bgcolor: barColor, opacity: isFutureForecast ? 0.6 : 1 };
     };
-
-    const groupedTasks = useMemo(() => {
-        const groups = {};
-        liveTasks.forEach(task => {
-            const phase = task.phase || "General";
-            if (!groups[phase]) groups[phase] = [];
-            groups[phase].push(task);
-        });
-        return groups;
-    }, [liveTasks]);
 
     const renderTimelineHeader = () => {
         if (!minDate || totalDays <= 0) return null;
@@ -401,233 +515,173 @@ export default function GanttScheduleTab({ project, projectBoqItems, updateProje
         });
         const buffer = await workbook.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        saveAs(blob, `${project.name}_Live_Schedule.xlsx`);
+        saveAs(blob, `${projectName || 'Project'}_Live_Schedule.xlsx`);
+    };
+
+    return (
+        <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
+            <Box sx={{ p: 2, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'center' }, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'rgba(0,0,0,0.2)', gap: 2 }}>
+                <Box display="flex" flexWrap="wrap" alignItems="center" gap={2}>
+                    <Typography variant="subtitle1" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <TimelineIcon color="primary" fontSize="small" /> LIVE FORECAST MATRIX
+                    </Typography>
+                    <Box display="flex" alignItems="center" gap={0.5} bgcolor="rgba(0,0,0,0.3)" borderRadius={2} px={1}>
+                        <IconButton size="small" onClick={() => setZoomLevel(z => Math.max(0.2, z - 0.2))} color="primary"><ZoomOutIcon fontSize="small" /></IconButton>
+                        <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', width: '40px', textAlign: 'center' }}>{Math.round(zoomLevel * 100)}%</Typography>
+                        <IconButton size="small" onClick={() => setZoomLevel(z => Math.min(4, z + 0.2))} color="primary"><ZoomInIcon fontSize="small" /></IconButton>
+                    </Box>
+                    <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={exportGanttToExcel} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>
+                        EXPORT
+                    </Button>
+                </Box>
+                <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
+                    EXPECTED DURATION: <Typography component="span" fontWeight="bold" color={totalDays > 0 ? "warning.main" : "text.secondary"}>{totalDays > 0 ? `${totalDays} DAYS` : "TBD"}</Typography>
+                </Typography>
+            </Box>
+
+            <TableContainer sx={{ overflowX: 'auto', overflowY: 'hidden' }}>
+                <Table size="small" sx={{ minWidth: 'max-content' }}>
+                    <TableHead sx={{ bgcolor: STICKY_BG }}>
+                        <TableRow>
+                            <TableCell sx={{ width: { xs: 120, sm: 200, md: 300 }, minWidth: { xs: 120, sm: 200, md: 300 }, maxWidth: { xs: 120, sm: 200, md: 300 }, position: 'sticky', left: 0, zIndex: 20, bgcolor: STICKY_BG, fontFamily: "'JetBrains Mono', monospace", fontSize: { xs: '10px', md: '11px' }, borderRight: '1px solid rgba(255,255,255,0.05)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                TASK / MILESTONE
+                            </TableCell>
+                            <TableCell sx={{ width: ganttColumnWidth, minWidth: ganttColumnWidth, maxWidth: ganttColumnWidth, p: 0, verticalAlign: 'bottom' }}>
+                                {renderTimelineHeader()}
+                            </TableCell>
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {Object.keys(groupedTasks).length > 0 ? (
+                            Object.entries(groupedTasks).map(([phaseName, phaseTasks]) => (
+                                <React.Fragment key={`gantt-phase-${phaseName}`}>
+                                    <TableRow sx={{ bgcolor: 'rgba(59, 130, 246, 0.1)' }}>
+                                        <TableCell sx={{ py: 1.5, position: 'sticky', left: 0, zIndex: 10, bgcolor: STICKY_BG, borderBottom: '1px solid rgba(59, 130, 246, 0.3)', borderRight: '1px solid rgba(255,255,255,0.05)', width: { xs: 120, sm: 200, md: 300 }, minWidth: { xs: 120, sm: 200, md: 300 }, maxWidth: { xs: 120, sm: 200, md: 300 }, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                            <Typography variant="subtitle2" color="primary.main" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: { xs: '11px', md: '14px' } }}>
+                                                ❖ PHASE: {phaseName.toUpperCase()}
+                                            </Typography>
+                                        </TableCell>
+                                        <TableCell sx={{ borderBottom: '1px solid rgba(59, 130, 246, 0.3)' }}></TableCell>
+                                    </TableRow>
+
+                                    {phaseTasks.map(task => {
+                                        const baseStyles = getBaselineStyles(task);
+                                        const actStyles = getForecastStyles(task);
+                                        const isMilestone = task.type === "Milestone";
+
+                                        return (
+                                            <TableRow key={`matrix-${task.id}`} hover>
+                                                <TableCell sx={{ position: 'sticky', left: 0, zIndex: 10, bgcolor: STICKY_BG, borderRight: '1px solid rgba(255,255,255,0.05)', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', fontWeight: 'bold', width: { xs: 120, sm: 200, md: 300 }, minWidth: { xs: 120, sm: 200, md: 300 }, maxWidth: { xs: 120, sm: 200, md: 300 } }}>
+                                                    <Box display="flex" alignItems="center" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                        {task.name}
+                                                        {isMilestone && <Typography component="span" color="warning.main" ml={0.5}>◆</Typography>}
+                                                    </Box>
+                                                </TableCell>
+                                                <TableCell sx={{ position: 'relative', borderLeft: '1px dashed rgba(255,255,255,0.1)', p: 1, backgroundImage: totalDays > 0 ? `repeating-linear-gradient(to right, transparent, transparent calc(100% / ${totalDays} - 1px), rgba(255,255,255,0.05) calc(100% / ${totalDays}))` : 'none' }}>
+                                                    <Box sx={{ width: '100%', height: '28px', position: 'relative', borderRadius: 1 }}>
+                                                        {baseStyles && (
+                                                            isMilestone ? (
+                                                                <Box sx={{ position: 'absolute', left: baseStyles.left, width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', transform: 'translate(-50%, -50%) rotate(45deg)', top: '50%', zIndex: 1 }} />
+                                                            ) : (
+                                                                <Box sx={{ ...baseStyles, position: 'absolute', height: '50%', top: '25%', borderRadius: 1, border: '1px dashed rgba(255,255,255,0.4)', bgcolor: 'rgba(255,255,255,0.05)', zIndex: 1 }} />
+                                                            )
+                                                        )}
+                                                        {actStyles && (
+                                                            isMilestone ? (
+                                                                <Box sx={{ position: 'absolute', left: actStyles.left, width: '14px', height: '14px', bgcolor: actStyles.bgcolor, backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.2) 2px, rgba(0,0,0,0.2) 4px)', transform: 'translate(-50%, -50%) rotate(45deg)', top: '50%', boxShadow: '0 0 8px rgba(0,0,0,0.5)', opacity: actStyles.opacity, zIndex: 2 }} />
+                                                            ) : (
+                                                                <Box sx={{ ...actStyles, position: 'absolute', height: '80%', top: '10%', borderRadius: 1, backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.2) 4px, rgba(0,0,0,0.2) 6px)', boxShadow: '0 0 8px rgba(0,0,0,0.4)', transition: 'all 0.3s ease', zIndex: 2 }} />
+                                                            )
+                                                        )}
+                                                    </Box>
+                                                </TableCell>
+                                            </TableRow>
+                                        )
+                                    })}
+                                </React.Fragment>
+                            ))
+                        ) : (
+                            <TableRow><TableCell colSpan={2} align="center" sx={{ py: 4, color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>NO_TASKS_SCHEDULED</TableCell></TableRow>
+                        )}
+                    </TableBody>
+                </Table>
+            </TableContainer>
+        </Paper>
+    );
+};
+
+// ============================================================================
+// 🚀 MAIN COMPONENT
+// ============================================================================
+export default function GanttScheduleTab({ projectId }) {
+    const { data: project } = useProject(projectId);
+    const { data: rawProjectBoqs = [] } = useProjectBoqs(projectId);
+    const updateProjectMutation = useUpdateProject();
+
+    const tasks = useMemo(() => {
+        if (!project || !project.ganttTasks) return [];
+        if (typeof project.ganttTasks === 'string') {
+            try { return JSON.parse(project.ganttTasks); } catch { return []; }
+        }
+        return project.ganttTasks;
+    }, [project?.ganttTasks]);
+
+    const projectBoqItems = useMemo(() => {
+        return rawProjectBoqs.map(b => {
+            try { return { ...b, measurements: JSON.parse(b.measurements || '[]') }; }
+            catch { return { ...b, measurements: [] }; }
+        });
+    }, [rawProjectBoqs]);
+
+    const availablePhases = useMemo(() => {
+        const phases = new Set((projectBoqItems || []).map(item => item.phase).filter(Boolean));
+        tasks.forEach(t => { if (t.phase) phases.add(t.phase); });
+        if (phases.size === 0) return ["Substructure", "Superstructure", "Finishing", "MEP", "General"];
+        return Array.from(phases);
+    }, [projectBoqItems, tasks]);
+
+    const liveTasks = useMemo(() => calculateLiveForecast(tasks), [tasks]);
+
+    const groupedTasks = useMemo(() => {
+        const groups = {};
+        liveTasks.forEach(task => {
+            const phase = task.phase || "General";
+            if (!groups[phase]) groups[phase] = [];
+            groups[phase].push(task);
+        });
+        return groups;
+    }, [liveTasks]);
+
+    const saveTasks = async (newTasks) => {
+        const scheduledTasks = cascadeDates(newTasks);
+        await updateProjectMutation.mutateAsync({
+            id: projectId,
+            data: { ganttTasks: JSON.stringify(scheduledTasks) }
+        });
     };
 
     return (
         <Box display="flex" flexDirection="column" gap={4}>
-            {/* --- 1. RESPONSIVE TASK CREATION FORM --- */}
-            <Paper sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
-                <Typography variant="subtitle2" fontWeight="bold" mb={2} sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.5px', fontSize: '14px' }}>
-                    ADD_SCHEDULE_ITEM
-                </Typography>
-                <Grid container spacing={2} alignItems="flex-start">
-                    <Grid item xs={12} md={2}>
-                        <TextField select fullWidth size="small" label="TYPE" value={taskType} onChange={e => setTaskType(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}>
-                            <MenuItem value="Task" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>Task</MenuItem>
-                            <MenuItem value="Milestone" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>Milestone</MenuItem>
-                        </TextField>
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                        <TextField fullWidth size="small" label="NAME" value={taskName} onChange={e => setTaskName(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                        <Autocomplete freeSolo fullWidth options={availablePhases} value={activePhase} onChange={(e, newVal) => setActivePhase(newVal || "General")} onInputChange={(e, newVal) => setActivePhase(newVal || "General")} renderInput={(params) => <TextField {...params} size="small" label="PHASE" InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ ...params.InputProps, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />} />
-                    </Grid>
-                    <Grid item xs={6} md={2}>
-                        <TextField type="date" fullWidth size="small" label="BASELINE START" value={startDate} onChange={e => setStartDate(e.target.value)} InputLabelProps={{ shrink: true, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                    </Grid>
-                    <Grid item xs={6} md={2}>
-                        <TextField type="date" fullWidth size="small" label="BASELINE END" value={taskType === "Milestone" ? startDate : endDate} onChange={e => setEndDate(e.target.value)} disabled={taskType === "Milestone"} inputProps={{ min: startDate }} InputLabelProps={{ shrink: true, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                    </Grid>
-                    <Grid item xs={12} md={3}>
-                        <TextField select fullWidth size="small" label="PREDECESSOR" value={predecessorId} onChange={e => setPredecessorId(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}>
-                            <MenuItem value="">-- NONE --</MenuItem>
-                            {liveTasks.map(t => <MenuItem key={t.id} value={t.id} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', whiteSpace: 'normal' }}>{t.name}</MenuItem>)}
-                        </TextField>
-                    </Grid>
-                    <Grid item xs={6} md={2}>
-                        <TextField select fullWidth size="small" label="DEP TYPE" value={dependencyType} onChange={e => setDependencyType(e.target.value)} disabled={!predecessorId} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}>
-                            {dependencyOptions.map(opt => <MenuItem key={opt.value} value={opt.value} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{opt.value}</MenuItem>)}
-                        </TextField>
-                    </Grid>
-                    <Grid item xs={6} md={1}>
-                        <TextField type="number" fullWidth size="small" label="LAG" value={dependencyLag} onChange={e => setDependencyLag(e.target.value)} disabled={!predecessorId} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                    </Grid>
-                    <Grid item xs={12} md={2}>
-                        <Button fullWidth variant="contained" color="primary" onClick={addTask} startIcon={<AddIcon />} sx={{ height: 40, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: '12px' }}>ADD</Button>
-                    </Grid>
-                </Grid>
-            </Paper>
+            <GanttTaskForm
+                tasks={tasks}
+                liveTasks={liveTasks}
+                availablePhases={availablePhases}
+                saveTasks={saveTasks}
+            />
 
-            {/* --- 2. THE WBS DATA TABLE --- */}
-            <Paper elevation={0} sx={{ p: { xs: 1, sm: 3 }, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} px={{ xs: 1, sm: 0 }}>
-                    <Typography variant="subtitle2" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <AccountTreeIcon color="primary" fontSize="small" /> WORK BREAKDOWN STRUCTURE (WBS)
-                    </Typography>
-                </Box>
-                <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, overflowX: 'auto' }}>
-                    <Table size="small" sx={{ minWidth: 900 }}>
-                        <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.3)' }}>
-                            <TableRow>
-                                <TableCell sx={{ width: 40 }}></TableCell>
-                                <TableCell sx={{ width: '30%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap' }}>TASK NAME</TableCell>
-                                <TableCell sx={{ width: '15%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap', color: 'text.secondary' }}>BASELINE START</TableCell>
-                                <TableCell sx={{ width: '15%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap', color: 'text.secondary' }}>BASELINE END</TableCell>
-                                <TableCell sx={{ width: '20%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap' }}>DEPENDENCY</TableCell>
-                                <TableCell sx={{ width: '15%', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap' }}>STATUS</TableCell>
-                                <TableCell align="center" sx={{ width: '5%' }}></TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {Object.keys(groupedTasks).length > 0 ? (
-                                Object.entries(groupedTasks).map(([phaseName, phaseTasks]) => (
-                                    <React.Fragment key={`wbs-phase-${phaseName}`}>
-                                        <TableRow sx={{ bgcolor: 'rgba(59, 130, 246, 0.05)' }}>
-                                            <TableCell colSpan={7} sx={{ py: 1.5, borderBottom: '1px solid rgba(59, 130, 246, 0.2)' }}>
-                                                <Typography variant="subtitle2" color="primary.main" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px' }}>◲ PHASE: {phaseName.toUpperCase()}</Typography>
-                                            </TableCell>
-                                        </TableRow>
-                                        {phaseTasks.map(task => {
-                                            const isMilestone = task.type === "Milestone";
-                                            const isStartLocked = task.dependency && (task.dependency.type === 'FS' || task.dependency.type === 'SS');
-                                            const isEndLocked = isMilestone || (task.dependency && (task.dependency.type === 'FF' || task.dependency.type === 'SF'));
-                                            const nativeSelectStyle = { background: 'transparent', color: 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', outline: 'none', borderBottom: '1px dotted rgba(255,255,255,0.3)', cursor: 'pointer' };
+            <GanttWbsTable
+                tasks={tasks}
+                liveTasks={liveTasks}
+                groupedTasks={groupedTasks}
+                saveTasks={saveTasks}
+            />
 
-                                            return (
-                                                <TableRow key={task.id} hover draggable onDragStart={(e) => handleDragStart(e, task.id)} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, task.id)} sx={{ opacity: draggedId === task.id ? 0.4 : 1, transition: 'opacity 0.2s' }}>
-                                                    <TableCell sx={{ cursor: 'grab', py: 0 }}><DragIndicatorIcon color="action" fontSize="small" sx={{ verticalAlign: 'middle' }} /></TableCell>
-                                                    <TableCell>
-                                                        <Box display="flex" alignItems="center">
-                                                            <input type="text" value={task.name} onChange={e => updateTaskInline(task.id, "name", e.target.value)} style={{ background: 'transparent', color: 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', fontWeight: 'bold', width: '100%', minWidth: '150px', outline: 'none' }} />
-                                                            {isMilestone && <Typography component="span" color="warning.main" ml={0.5}>◆</Typography>}
-                                                        </Box>
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <input type="date" value={task.startDate} onChange={e => updateTaskInline(task.id, "startDate", e.target.value)} disabled={isStartLocked} style={{ background: 'transparent', color: isStartLocked ? 'gray' : 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', width: '100%', minWidth: '110px', outline: 'none' }} />
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <input type="date" value={task.endDate} onChange={e => updateTaskInline(task.id, "endDate", e.target.value)} disabled={isEndLocked} style={{ background: 'transparent', color: isEndLocked ? 'gray' : 'inherit', border: 'none', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', width: '100%', minWidth: '110px', outline: 'none' }} />
-                                                    </TableCell>
-                                                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                                                        <select value={task.dependency?.taskId || ""} onChange={e => updateDependency(task.id, e.target.value, task.dependency?.type || "FS", task.dependency?.lag || 0)} style={{ ...nativeSelectStyle, width: '80px', marginRight: '6px' }}>
-                                                            <option value="" style={{ color: 'black' }}>- None -</option>
-                                                            {liveTasks.filter(t => t.id !== task.id).map(t => <option key={t.id} value={t.id} style={{ color: 'black' }}>{t.name}</option>)}
-                                                        </select>
-                                                        <select value={task.dependency?.type || "FS"} onChange={e => updateDependency(task.id, task.dependency?.taskId, e.target.value, task.dependency?.lag || 0)} disabled={!task.dependency?.taskId} style={{ ...nativeSelectStyle, width: '40px', marginRight: '6px', opacity: !task.dependency?.taskId ? 0.3 : 1 }}>
-                                                            <option value="FS" style={{ color: 'black' }}>FS</option><option value="SS" style={{ color: 'black' }}>SS</option>
-                                                            <option value="FF" style={{ color: 'black' }}>FF</option><option value="SF" style={{ color: 'black' }}>SF</option>
-                                                        </select>
-                                                        <input type="number" value={task.dependency?.lag || 0} onChange={e => updateDependency(task.id, task.dependency?.taskId, task.dependency?.type || "FS", e.target.value)} disabled={!task.dependency?.taskId} style={{ ...nativeSelectStyle, width: '40px', opacity: !task.dependency?.taskId ? 0.3 : 1 }} />
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <select value={task.status || "Not Started"} onChange={e => updateTaskInline(task.id, "status", e.target.value)} style={{ ...nativeSelectStyle, width: '100%', minWidth: '100px' }}>
-                                                            <option value="Not Started" style={{ color: 'black' }}>Not Started</option>
-                                                            <option value="Pending Procurement" style={{ color: 'black' }}>Procurement</option>
-                                                            <option value="In Progress" style={{ color: 'black' }}>In Progress</option>
-                                                            <option value="Quality Check" style={{ color: 'black' }}>QA Check</option>
-                                                            <option value="Completed" style={{ color: 'black' }}>Completed</option>
-                                                        </select>
-                                                    </TableCell>
-                                                    <TableCell align="center"><IconButton size="small" color="error" onClick={() => deleteTask(task.id)}><DeleteIcon fontSize="small" /></IconButton></TableCell>
-                                                </TableRow>
-                                            )
-                                        })}
-                                    </React.Fragment>
-                                ))
-                            ) : (
-                                <TableRow><TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>NO_TASKS_SCHEDULED</TableCell></TableRow>
-                            )}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
-            </Paper>
-
-            {/* --- 3. THE DUAL-BASELINE GANTT MATRIX --- */}
-            <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
-                <Box sx={{ p: 2, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'center' }, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'rgba(0,0,0,0.2)', gap: 2 }}>
-                    <Box display="flex" flexWrap="wrap" alignItems="center" gap={2}>
-                        <Typography variant="subtitle1" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <TimelineIcon color="primary" fontSize="small" /> LIVE FORECAST MATRIX
-                        </Typography>
-                        <Box display="flex" alignItems="center" gap={0.5} bgcolor="rgba(0,0,0,0.3)" borderRadius={2} px={1}>
-                            <IconButton size="small" onClick={() => setZoomLevel(z => Math.max(0.2, z - 0.2))} color="primary"><ZoomOutIcon fontSize="small" /></IconButton>
-                            <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', width: '40px', textAlign: 'center' }}>{Math.round(zoomLevel * 100)}%</Typography>
-                            <IconButton size="small" onClick={() => setZoomLevel(z => Math.min(4, z + 0.2))} color="primary"><ZoomInIcon fontSize="small" /></IconButton>
-                        </Box>
-                        <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={exportGanttToExcel} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>
-                            EXPORT
-                        </Button>
-                    </Box>
-                    <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
-                        EXPECTED DURATION: <Typography component="span" fontWeight="bold" color={totalDays > 0 ? "warning.main" : "text.secondary"}>{totalDays > 0 ? `${totalDays} DAYS` : "TBD"}</Typography>
-                    </Typography>
-                </Box>
-
-                <TableContainer sx={{ overflowX: 'auto', overflowY: 'hidden' }}>
-                    <Table size="small" sx={{ minWidth: 'max-content' }}>
-                        <TableHead sx={{ bgcolor: STICKY_BG }}>
-                            <TableRow>
-                                <TableCell sx={{ width: { xs: 120, sm: 200, md: 300 }, minWidth: { xs: 120, sm: 200, md: 300 }, maxWidth: { xs: 120, sm: 200, md: 300 }, position: 'sticky', left: 0, zIndex: 20, bgcolor: STICKY_BG, fontFamily: "'JetBrains Mono', monospace", fontSize: { xs: '10px', md: '11px' }, borderRight: '1px solid rgba(255,255,255,0.05)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    TASK / MILESTONE
-                                </TableCell>
-                                <TableCell sx={{ width: ganttColumnWidth, minWidth: ganttColumnWidth, maxWidth: ganttColumnWidth, p: 0, verticalAlign: 'bottom' }}>
-                                    {renderTimelineHeader()}
-                                </TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {Object.keys(groupedTasks).length > 0 ? (
-                                Object.entries(groupedTasks).map(([phaseName, phaseTasks]) => (
-                                    <React.Fragment key={`gantt-phase-${phaseName}`}>
-                                        <TableRow sx={{ bgcolor: 'rgba(59, 130, 246, 0.1)' }}>
-                                            <TableCell sx={{ py: 1.5, position: 'sticky', left: 0, zIndex: 10, bgcolor: STICKY_BG, borderBottom: '1px solid rgba(59, 130, 246, 0.3)', borderRight: '1px solid rgba(255,255,255,0.05)', width: { xs: 120, sm: 200, md: 300 }, minWidth: { xs: 120, sm: 200, md: 300 }, maxWidth: { xs: 120, sm: 200, md: 300 }, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                                <Typography variant="subtitle2" color="primary.main" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: { xs: '11px', md: '14px' } }}>
-                                                    ❖ PHASE: {phaseName.toUpperCase()}
-                                                </Typography>
-                                            </TableCell>
-                                            <TableCell sx={{ borderBottom: '1px solid rgba(59, 130, 246, 0.3)' }}></TableCell>
-                                        </TableRow>
-
-                                        {phaseTasks.map(task => {
-                                            const baseStyles = getBaselineStyles(task);
-                                            const actStyles = getForecastStyles(task);
-                                            const isMilestone = task.type === "Milestone";
-
-                                            return (
-                                                <TableRow key={`matrix-${task.id}`} hover>
-                                                    <TableCell sx={{ position: 'sticky', left: 0, zIndex: 10, bgcolor: STICKY_BG, borderRight: '1px solid rgba(255,255,255,0.05)', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', fontWeight: 'bold', width: { xs: 120, sm: 200, md: 300 }, minWidth: { xs: 120, sm: 200, md: 300 }, maxWidth: { xs: 120, sm: 200, md: 300 } }}>
-                                                        <Box display="flex" alignItems="center" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                            {task.name}
-                                                            {isMilestone && <Typography component="span" color="warning.main" ml={0.5}>◆</Typography>}
-                                                        </Box>
-                                                    </TableCell>
-                                                    <TableCell sx={{ position: 'relative', borderLeft: '1px dashed rgba(255,255,255,0.1)', p: 1, backgroundImage: totalDays > 0 ? `repeating-linear-gradient(to right, transparent, transparent calc(100% / ${totalDays} - 1px), rgba(255,255,255,0.05) calc(100% / ${totalDays}))` : 'none' }}>
-                                                        <Box sx={{ width: '100%', height: '28px', position: 'relative', borderRadius: 1 }}>
-
-                                                            {/* 🔥 LAYER 1: BASELINE PLANNED SCHEDULE (Hollow Box) */}
-                                                            {baseStyles && (
-                                                                isMilestone ? (
-                                                                    <Box sx={{ position: 'absolute', left: baseStyles.left, width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', transform: 'translate(-50%, -50%) rotate(45deg)', top: '50%', zIndex: 1 }} />
-                                                                ) : (
-                                                                    <Box sx={{ ...baseStyles, position: 'absolute', height: '50%', top: '25%', borderRadius: 1, border: '1px dashed rgba(255,255,255,0.4)', bgcolor: 'rgba(255,255,255,0.05)', zIndex: 1 }} />
-                                                                )
-                                                            )}
-
-                                                            {/* 🔥 LAYER 2: ACTUAL / FORECAST PROGRESS (Solid / Hatched) */}
-                                                            {actStyles && (
-                                                                isMilestone ? (
-                                                                    <Box sx={{ position: 'absolute', left: actStyles.left, width: '14px', height: '14px', bgcolor: actStyles.bgcolor, backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.2) 2px, rgba(0,0,0,0.2) 4px)', transform: 'translate(-50%, -50%) rotate(45deg)', top: '50%', boxShadow: '0 0 8px rgba(0,0,0,0.5)', opacity: actStyles.opacity, zIndex: 2 }} />
-                                                                ) : (
-                                                                    <Box sx={{ ...actStyles, position: 'absolute', height: '80%', top: '10%', borderRadius: 1, backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.2) 4px, rgba(0,0,0,0.2) 6px)', boxShadow: '0 0 8px rgba(0,0,0,0.4)', transition: 'all 0.3s ease', zIndex: 2 }} />
-                                                                )
-                                                            )}
-
-                                                        </Box>
-                                                    </TableCell>
-                                                </TableRow>
-                                            )
-                                        })}
-                                    </React.Fragment>
-                                ))
-                            ) : (
-                                <TableRow><TableCell colSpan={2} align="center" sx={{ py: 4, color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>NO_TASKS_SCHEDULED</TableCell></TableRow>
-                            )}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
-            </Paper>
+            <GanttMatrix
+                projectName={project?.name}
+                tasks={tasks}
+                liveTasks={liveTasks}
+                groupedTasks={groupedTasks}
+            />
         </Box>
     );
 }

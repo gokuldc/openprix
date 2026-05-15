@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Typography, Grid, Paper, Button, IconButton, Dialog, DialogContent, Checkbox } from '@mui/material';
+import { Box, Typography, Grid, Paper, Button, IconButton, Dialog, DialogContent, Checkbox, Autocomplete, TextField } from '@mui/material';
 import AddAPhotoIcon from '@mui/icons-material/AddAPhoto';
 import DeleteIcon from '@mui/icons-material/Delete';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
@@ -9,15 +9,16 @@ import CloseIcon from '@mui/icons-material/Close';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 
+// 🔥 IMPORT REACT QUERY
+import { useProject } from '../../hooks/useQueries';
+
 const SmartImage = ({ filePath, alt, style }) => {
     const [src, setSrc] = useState(null);
 
     useEffect(() => {
         let isMounted = true;
-
         const resolveImage = async () => {
             const isDesktop = navigator.userAgent.toLowerCase().includes('electron');
-
             if (isDesktop && window.api?.os?.getBase64) {
                 try {
                     const b64 = await window.api.os.getBase64(filePath);
@@ -25,9 +26,7 @@ const SmartImage = ({ filePath, alt, style }) => {
                         setSrc(b64);
                         return;
                     }
-                } catch (e) {
-                    console.error("Local image load failed:", e);
-                }
+                } catch (e) { console.error("Local image load failed:", e); }
             }
 
             if (isMounted) {
@@ -47,42 +46,52 @@ const SmartImage = ({ filePath, alt, style }) => {
             </Typography>
         </Box>
     );
-
     return <img src={src} alt={alt} style={style} />;
 };
 
 
 export default function SiteGalleryTab({ projectId }) {
+    const { data: rawProject } = useProject(projectId);
+    const project = rawProject || {};
+
     const [photos, setPhotos] = useState([]);
     const [selectedImg, setSelectedImg] = useState(null);
     const [uploadProgress, setUploadProgress] = useState({ uploading: false, current: 0, total: 0 });
-    
-    // 🔥 NEW: State to track selected photos for bulk deletion
     const [selectedIds, setSelectedIds] = useState([]);
-    
+
+    // 🔥 DYNAMIC FOLDER TARGET STATE
+    const [templateFolders, setTemplateFolders] = useState(["Site Photos", "Progress", "Defects"]);
+    const [category, setCategory] = useState("Site Photos");
+
     const fileInputRef = useRef(null);
 
     const loadPhotos = async () => {
         const docs = await window.api.db.getProjectDocuments(projectId);
-        const images = docs.filter(d => d.category === 'site_gallery' || /\.(jpg|jpeg|png|webp)$/i.test(d.name));
+        // The gallery renders all image types regardless of which custom category folder they were put in
+        const images = docs.filter(d => /\.(jpg|jpeg|png|webp|gif)$/i.test(d.name) || /\.(jpg|jpeg|png|webp|gif)$/i.test(d.filePath));
         setPhotos(images);
     };
 
-    useEffect(() => { loadPhotos(); }, [projectId]);
+    useEffect(() => {
+        loadPhotos();
+        // Fetch the global folder template from settings
+        window.api.db.getSettings('folder_template').then(res => {
+            if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+                setTemplateFolders(res.data);
+                // Smart auto-select a photo-related folder if it exists
+                const photoFolder = res.data.find(c => c.toLowerCase().includes('photo') || c.toLowerCase().includes('gallery'));
+                if (photoFolder) setCategory(photoFolder);
+            }
+        });
+    }, [projectId]);
 
     useEffect(() => {
         if (!selectedImg) return;
-
         const handleKeyDown = (e) => {
             const currentIndex = photos.findIndex(p => p.id === selectedImg.id);
-            if (e.key === 'ArrowRight') {
-                setSelectedImg(currentIndex < photos.length - 1 ? photos[currentIndex + 1] : photos[0]);
-            }
-            if (e.key === 'ArrowLeft') {
-                setSelectedImg(currentIndex > 0 ? photos[currentIndex - 1] : photos[photos.length - 1]);
-            }
+            if (e.key === 'ArrowRight') setSelectedImg(currentIndex < photos.length - 1 ? photos[currentIndex + 1] : photos[0]);
+            if (e.key === 'ArrowLeft') setSelectedImg(currentIndex > 0 ? photos[currentIndex - 1] : photos[photos.length - 1]);
         };
-
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [selectedImg, photos]);
@@ -95,7 +104,7 @@ export default function SiteGalleryTab({ projectId }) {
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
-            
+
             const base64Data = await new Promise((resolve) => {
                 const reader = new FileReader();
                 reader.onload = (evt) => resolve(evt.target.result);
@@ -103,15 +112,23 @@ export default function SiteGalleryTab({ projectId }) {
             });
 
             try {
-                const res = await window.api.os.uploadFileWeb(file.name, base64Data, projectId);
+                // 🔥 HOST SERVER ROUTING LOGIC
+                let targetFolder = undefined;
+                if (project?.isScaffolded && project?.scaffoldPath) {
+                    const basePath = project.scaffoldPath.replace(/[/\\]$/, '');
+                    targetFolder = `${basePath}/${category}`;
+                }
+
+                // Send to Rust backend with specific folder target
+                const res = await window.api.os.uploadFileWeb(file.name, base64Data, targetFolder);
                 const filePath = (res && typeof res === 'string') ? res : null;
-                
+
                 if (filePath) {
                     await window.api.db.saveProjectDocument({
                         id: window.crypto.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2),
                         projectId,
                         name: file.name,
-                        category: 'site_gallery',
+                        category: category, // 🔥 Use the selected dynamic category
                         filePath,
                         fileType: 'image',
                         addedAt: Date.now()
@@ -133,27 +150,21 @@ export default function SiteGalleryTab({ projectId }) {
 
     const handleDelete = async (id, e) => {
         e.stopPropagation();
-        if (window.confirm("Permanently delete this site photo?")) {
+        if (window.confirm("Remove this photo from the gallery tracker? (The file remains on the host server)")) {
             await window.api.db.deleteProjectDocument(id);
-            // Clear from selection if it was selected
             setSelectedIds(prev => prev.filter(selectedId => selectedId !== id));
             loadPhotos();
         }
     };
 
-    // 🔥 NEW: Toggle selection for a single photo
     const toggleSelect = (id, e) => {
         e.stopPropagation();
-        setSelectedIds(prev => 
-            prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
-        );
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
     };
 
-    // 🔥 NEW: Bulk delete handler
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
-        if (window.confirm(`Permanently delete ${selectedIds.length} selected photos?`)) {
-            // Delete sequentially to prevent locking the SQLite database
+        if (window.confirm(`Remove ${selectedIds.length} selected photos from the gallery tracker?`)) {
             for (const id of selectedIds) {
                 await window.api.db.deleteProjectDocument(id);
             }
@@ -174,50 +185,46 @@ export default function SiteGalleryTab({ projectId }) {
 
     return (
         <Box>
-            <input
-                type="file"
-                accept="image/*"
-                multiple 
-                ref={fileInputRef}
-                style={{ display: 'none' }}
-                onChange={handleFileChange}
-            />
+            <input type="file" accept="image/*" multiple ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} />
 
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'center' }, mb: 3, gap: 2 }}>
                 <Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '14px' }}>
                     // SITE_VISUAL_LOG ({photos.length})
                 </Typography>
-                
-                {/* 🔥 UPGRADED: Contextual Action Button (Upload vs Delete Selected) */}
-                <Box>
+
+                <Box display="flex" gap={2} flexWrap="wrap">
                     {selectedIds.length > 0 ? (
-                        <Button 
-                            variant="contained" 
-                            color="error"
-                            startIcon={<DeleteIcon />} 
-                            onClick={handleBulkDelete} 
-                            sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', mr: 1 }}
+                        <Button
+                            variant="contained" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete}
+                            sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}
                         >
                             DELETE SELECTED ({selectedIds.length})
                         </Button>
                     ) : null}
 
-                    <Button 
-                        variant="contained" 
-                        startIcon={<AddAPhotoIcon />} 
-                        onClick={() => fileInputRef.current.click()} 
-                        disabled={uploadProgress.uploading}
-                        sx={{ 
-                            borderRadius: 50, 
-                            fontFamily: "'JetBrains Mono', monospace", 
-                            fontSize: '11px',
-                            transition: 'all 0.3s'
-                        }}
+                    {/* 🔥 DYNAMIC DIRECTORY SELECTOR */}
+                    <Autocomplete
+                        freeSolo
+                        options={templateFolders}
+                        value={category}
+                        onChange={(e, newVal) => setCategory(newVal || "Site Photos")}
+                        onInputChange={(e, newVal) => setCategory(newVal || "Site Photos")}
+                        sx={{ minWidth: 200 }}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                size="small"
+                                label={project?.isScaffolded ? "TARGET DIRECTORY" : "CATEGORY"}
+                                InputLabelProps={{ ...params.InputLabelProps, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' } }}
+                            />
+                        )}
+                    />
+
+                    <Button
+                        variant="contained" startIcon={<AddAPhotoIcon />} onClick={() => fileInputRef.current.click()} disabled={uploadProgress.uploading}
+                        sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', transition: 'all 0.3s' }}
                     >
-                        {uploadProgress.uploading 
-                            ? `UPLOADING (${uploadProgress.current} / ${uploadProgress.total})...` 
-                            : "UPLOAD_SITE_PHOTOS"
-                        }
+                        {uploadProgress.uploading ? `UPLOADING (${uploadProgress.current}/${uploadProgress.total})...` : "UPLOAD_SITE_PHOTOS"}
                     </Button>
                 </Box>
             </Box>
@@ -227,37 +234,26 @@ export default function SiteGalleryTab({ projectId }) {
                     const isSelected = selectedIds.includes(photo.id);
                     return (
                         <Grid item xs={12} sm={6} md={4} lg={3} key={photo.id}>
-                            <Paper 
-                                onClick={(e) => toggleSelect(photo.id, e)} // Clicking the card toggles selection
-                                sx={{ 
-                                    position: 'relative', 
-                                    overflow: 'hidden', 
-                                    borderRadius: 2, 
-                                    border: isSelected ? '2px solid #3b82f6' : '1px solid', 
-                                    borderColor: isSelected ? '#3b82f6' : 'divider', 
-                                    height: 200, 
-                                    bgcolor: 'rgba(0,0,0,0.2)', 
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s',
-                                    '&:hover .overlay': { opacity: 1 },
-                                    transform: isSelected ? 'scale(0.98)' : 'scale(1)'
+                            <Paper
+                                onClick={(e) => toggleSelect(photo.id, e)}
+                                sx={{
+                                    position: 'relative', overflow: 'hidden', borderRadius: 2,
+                                    border: isSelected ? '2px solid #3b82f6' : '1px solid',
+                                    borderColor: isSelected ? '#3b82f6' : 'divider',
+                                    height: 200, bgcolor: 'rgba(0,0,0,0.2)', cursor: 'pointer', transition: 'all 0.2s',
+                                    '&:hover .overlay': { opacity: 1 }, transform: isSelected ? 'scale(0.98)' : 'scale(1)'
                                 }}
                             >
-                                {/* 🔥 NEW: The Selection Checkbox */}
                                 <Checkbox
-                                    icon={<RadioButtonUncheckedIcon sx={{ color: 'rgba(255,255,255,0.7)' }}/>}
-                                    checkedIcon={<CheckCircleIcon sx={{ color: '#3b82f6' }}/>}
+                                    icon={<RadioButtonUncheckedIcon sx={{ color: 'rgba(255,255,255,0.7)' }} />}
+                                    checkedIcon={<CheckCircleIcon sx={{ color: '#3b82f6' }} />}
                                     checked={isSelected}
                                     onChange={(e) => toggleSelect(photo.id, e)}
                                     sx={{ position: 'absolute', top: 8, left: 8, zIndex: 10, bgcolor: isSelected ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.4)', borderRadius: 1, p: 0.5, '&:hover': { bgcolor: 'rgba(0,0,0,0.8)' } }}
                                 />
 
-                                <SmartImage
-                                    filePath={photo.filePath}
-                                    alt={photo.name}
-                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                />
-                                
+                                <SmartImage filePath={photo.filePath} alt={photo.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+
                                 <Box className="overlay" sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', bgcolor: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 2, opacity: isSelected ? 1 : 0, transition: '0.2s' }}>
                                     <IconButton color="primary" sx={{ bgcolor: 'rgba(0,0,0,0.7)', '&:hover': { bgcolor: '#000' } }} onClick={(e) => { e.stopPropagation(); setSelectedImg(photo); }}>
                                         <FullscreenIcon />
@@ -272,54 +268,28 @@ export default function SiteGalleryTab({ projectId }) {
                 })}
             </Grid>
 
-            <Dialog 
-                open={Boolean(selectedImg)} 
-                onClose={() => setSelectedImg(null)} 
-                maxWidth="lg"
-                fullWidth
-                PaperProps={{
-                    sx: { bgcolor: 'transparent', boxShadow: 'none', backgroundImage: 'none' }
-                }}
-            >
+            <Dialog open={Boolean(selectedImg)} onClose={() => setSelectedImg(null)} maxWidth="lg" fullWidth PaperProps={{ sx: { bgcolor: 'transparent', boxShadow: 'none', backgroundImage: 'none' } }}>
                 <DialogContent sx={{ p: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh', position: 'relative', overflow: 'hidden' }}>
-                    
                     {selectedImg && (
                         <>
                             <Box sx={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', height: '100%' }}>
-                                <SmartImage
-                                    filePath={selectedImg.filePath}
-                                    alt={selectedImg.name}
-                                    style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', borderRadius: '8px' }}
-                                />
+                                <SmartImage filePath={selectedImg.filePath} alt={selectedImg.name} style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', borderRadius: '8px' }} />
                             </Box>
-
-                            <IconButton 
-                                onClick={() => setSelectedImg(null)} 
-                                sx={{ position: 'absolute', top: 16, right: 16, color: 'white', bgcolor: 'rgba(0,0,0,0.6)', '&:hover': { bgcolor: 'rgba(255,0,0,0.8)' } }}
-                            >
+                            <IconButton onClick={() => setSelectedImg(null)} sx={{ position: 'absolute', top: 16, right: 16, color: 'white', bgcolor: 'rgba(0,0,0,0.6)', '&:hover': { bgcolor: 'rgba(255,0,0,0.8)' } }}>
                                 <CloseIcon />
                             </IconButton>
-
                             {photos.length > 1 && (
-                                <IconButton 
-                                    onClick={handlePrev} 
-                                    sx={{ position: 'absolute', left: 16, color: 'white', bgcolor: 'rgba(0,0,0,0.6)', '&:hover': { bgcolor: 'rgba(59, 130, 246, 0.8)' } }}
-                                >
+                                <IconButton onClick={handlePrev} sx={{ position: 'absolute', left: 16, color: 'white', bgcolor: 'rgba(0,0,0,0.6)', '&:hover': { bgcolor: 'rgba(59, 130, 246, 0.8)' } }}>
                                     <ChevronLeftIcon fontSize="large" />
                                 </IconButton>
                             )}
-
                             {photos.length > 1 && (
-                                <IconButton 
-                                    onClick={handleNext} 
-                                    sx={{ position: 'absolute', right: 16, color: 'white', bgcolor: 'rgba(0,0,0,0.6)', '&:hover': { bgcolor: 'rgba(59, 130, 246, 0.8)' } }}
-                                >
+                                <IconButton onClick={handleNext} sx={{ position: 'absolute', right: 16, color: 'white', bgcolor: 'rgba(0,0,0,0.6)', '&:hover': { bgcolor: 'rgba(59, 130, 246, 0.8)' } }}>
                                     <ChevronRightIcon fontSize="large" />
                                 </IconButton>
                             )}
                         </>
                     )}
-
                 </DialogContent>
             </Dialog>
         </Box>

@@ -110,7 +110,7 @@ export default function CreateBoqTab({ regions, resources, masterBoqs, loadData,
 
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
                 <Typography variant="h6" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: '16px' }}>
-                    {editingBoq ? "EDIT" : "CREATE"}_DATABOOK_ITEM
+                    {editingBoq ? "EDIT" : "CREATE"}_DATABOOK_ASSEMBLY
                 </Typography>
                 {editingBoq && (
                     <Button size="small" variant="outlined" color="error" onClick={clearEdit} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>CANCEL_EDIT</Button>
