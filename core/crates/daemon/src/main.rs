@@ -283,6 +283,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/regions/{id}",
             delete(routes::resources::delete_region),
         )
+        .route("/api/os/dirs", post(routes::os::list_directories))
+        .route("/api/os/scan", post(routes::os::scan_directory))
         .route("/api/os/scaffold", post(routes::os::scaffold_project))
         .route("/api/os/upload", post(routes::os::upload_file))
         .route("/api/os/download", get(routes::os::download_file))

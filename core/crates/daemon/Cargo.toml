@@ -9,7 +9,7 @@ default-run = "openprix"
 
 [dependencies]
 # The web framework (Replacing Express)
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart", "macros"] }
 # The async runtime (Rust doesn't have an event loop built-in like Node, so we use Tokio)
 tokio = { version = "1.0", features = ["full"] }
 # The database driver (Replacing better-sqlite3)

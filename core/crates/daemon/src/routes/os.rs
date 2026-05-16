@@ -1,12 +1,14 @@
+use axum::extract::Multipart;
 use axum::{
     Json,
     extract::Query,
     http::{StatusCode, header},
     response::IntoResponse,
 };
-use base64::{Engine as _, engine::general_purpose};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 
 // Assuming you have a standard ApiResponse struct in your routes module
 use crate::routes::ApiResponse;
@@ -19,14 +21,6 @@ pub struct DownloadQuery {
 #[derive(Deserialize)]
 pub struct OpenPayload {
     pub path: String,
-}
-
-#[derive(Deserialize)]
-pub struct UploadPayload {
-    pub filename: String,
-    pub base64: String,
-    #[serde(rename = "targetFolder")]
-    pub target_folder: Option<String>, // 🔥 The dynamic folder target from React
 }
 
 #[derive(Deserialize)]
@@ -71,70 +65,73 @@ pub async fn scaffold_project(Json(payload): Json<ScaffoldPayload>) -> Json<ApiR
 // ----------------------------------------------------------------------------
 // 2. UPLOAD FILE TO HOST
 // ----------------------------------------------------------------------------
-pub async fn upload_file(Json(payload): Json<UploadPayload>) -> Json<ApiResponse<String>> {
-    let b64_clean = if let Some(idx) = payload.base64.find(',') {
-        &payload.base64[idx + 1..]
-    } else {
-        &payload.base64
-    };
+pub async fn upload_file(mut multipart: Multipart) -> Json<ApiResponse<String>> {
+    let mut file_path = None;
 
-    // 🔥 Determine where to save the file
-    let upload_dir = match &payload.target_folder {
-        Some(path) => Path::new(path).to_path_buf(), // Use the Scaffolded Host Folder
-        None => {
-            // Fallback to internal storage if the project isn't scaffolded yet
-            let home = std::env::var("USERPROFILE")
-                .or_else(|_| std::env::var("HOME"))
-                .unwrap_or_else(|_| ".".to_string());
-            Path::new(&home).join(".openprix").join("uploads")
-        }
-    };
+    // Default fallback directory
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    let mut upload_dir = Path::new(&home).join(".openprix").join("uploads");
 
-    if let Err(e) = fs::create_dir_all(&upload_dir) {
-        return Json(ApiResponse {
-            success: false,
-            data: None,
-            error: Some(format!("Directory access failed: {}", e)),
-        });
-    }
+    // Loop through the stream chunks
+    while let Some(mut field) = multipart.next_field().await.unwrap_or(None) {
+        let name = field.name().unwrap_or("").to_string();
 
-    // Add timestamp to prevent overwriting files with the exact same name
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let safe_name = format!(
-        "{}_{}",
-        ts,
-        payload.filename.replace(
-            |c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_',
-            ""
-        )
-    );
-    let filepath = upload_dir.join(&safe_name);
-
-    match general_purpose::STANDARD.decode(b64_clean) {
-        Ok(bytes) => {
-            if let Err(e) = fs::write(&filepath, &bytes) {
+        if name == "targetFolder" {
+            let data = field.text().await.unwrap_or_default();
+            if !data.is_empty() && data != "null" {
+                upload_dir = Path::new(&data).to_path_buf();
+            }
+            if let Err(e) = std::fs::create_dir_all(&upload_dir) {
                 return Json(ApiResponse {
                     success: false,
                     data: None,
-                    error: Some(format!("Write failed: {}", e)),
+                    error: Some(format!("Dir error: {}", e)),
                 });
             }
-            // Return the absolute path as a simple string
-            Json(ApiResponse {
-                success: true,
-                data: Some(filepath.to_string_lossy().to_string()),
-                error: None,
-            })
+        } else if name == "file" {
+            // Variable declared exactly where it is used
+            let filename = field.file_name().unwrap_or("unnamed.file").to_string();
+
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            let safe_name = format!(
+                "{}_{}",
+                ts,
+                filename.replace(
+                    |c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_',
+                    ""
+                )
+            );
+            let dest_path = upload_dir.join(&safe_name);
+
+            // 🔥 STREAM DIRECTLY TO DISK IN CHUNKS
+            if let Ok(mut f) = File::create(&dest_path).await {
+                while let Ok(Some(chunk)) = field.chunk().await {
+                    let _ = f.write_all(&chunk).await;
+                }
+            }
+
+            // Normalize path for React
+            file_path = Some(dest_path.to_string_lossy().replace("\\", "/"));
         }
-        Err(_) => Json(ApiResponse {
+    }
+
+    if let Some(path) = file_path {
+        Json(ApiResponse {
+            success: true,
+            data: Some(path),
+            error: None,
+        })
+    } else {
+        Json(ApiResponse {
             success: false,
             data: None,
-            error: Some("Base64 decode failed".into()),
-        }),
+            error: Some("No file found in stream".into()),
+        })
     }
 }
 
@@ -185,4 +182,150 @@ pub async fn open_file(Json(payload): Json<OpenPayload>) -> Json<ApiResponse<Str
             error: Some("File missing or moved from host directory.".into()),
         })
     }
+}
+
+// ----------------------------------------------------------------------------
+// 5. DIRECTORY SCANNER (RECURSIVE & SLASH NORMALIZED)
+// ----------------------------------------------------------------------------
+#[derive(Deserialize)]
+pub struct ScanPayload {
+    #[serde(rename = "targetFolder")]
+    pub target_folder: String,
+    #[serde(rename = "ignoredExtensions")]
+    pub ignored_extensions: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct FileInfo {
+    pub name: String,
+    pub path: String,
+    pub extension: String,
+    pub size: u64,
+    pub modified: u128,
+}
+
+// 🔥 Helper function to recursively walk through all sub-directories!
+fn walk_dir_recursive(dir: &Path, ignored_exts: &Vec<String>, files: &mut Vec<FileInfo>) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                let path = entry.path();
+
+                if metadata.is_dir() {
+                    // It's a folder! Dive deeper into it.
+                    walk_dir_recursive(&path, ignored_exts, files);
+                } else if metadata.is_file() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let ext = path
+                        .extension()
+                        .map(|e| format!(".{}", e.to_string_lossy().to_lowercase()))
+                        .unwrap_or_default();
+
+                    if ignored_exts.contains(&ext) {
+                        continue; // Skip the junk files (.bak, .log, etc)
+                    }
+
+                    let modified = metadata
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis())
+                        .unwrap_or(0);
+
+                    // 🔥 Normalize Windows backslashes to standard forward slashes so React matches them perfectly!
+                    let normalized_path = path.to_string_lossy().replace("\\", "/");
+
+                    files.push(FileInfo {
+                        name,
+                        path: normalized_path,
+                        extension: ext,
+                        size: metadata.len(),
+                        modified,
+                    });
+                }
+            }
+        }
+    }
+}
+
+pub async fn scan_directory(Json(payload): Json<ScanPayload>) -> Json<ApiResponse<Vec<FileInfo>>> {
+    let dir_path = Path::new(&payload.target_folder);
+
+    if !dir_path.exists() || !dir_path.is_dir() {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("Directory does not exist.".into()),
+        });
+    }
+
+    let mut files = Vec::new();
+
+    // Kick off the recursive search
+    walk_dir_recursive(dir_path, &payload.ignored_extensions, &mut files);
+
+    Json(ApiResponse {
+        success: true,
+        data: Some(files),
+        error: None,
+    })
+}
+
+// ----------------------------------------------------------------------------
+// 6. DIRECTORY STRUCTURE MAPPER (For UI Dropdowns)
+// ----------------------------------------------------------------------------
+#[derive(Deserialize)]
+pub struct DirPayload {
+    #[serde(rename = "targetFolder")]
+    pub target_folder: String,
+}
+
+// Helper to recursively collect just the directory paths
+fn walk_dirs_recursive(dir: &Path, base_path: &Path, dirs: &mut Vec<String>) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                if metadata.is_dir() {
+                    let path = entry.path();
+
+                    // Extract the relative path (e.g., "01_Drawings/Architectural")
+                    if let Ok(rel_path) = path.strip_prefix(base_path) {
+                        let normalized = rel_path.to_string_lossy().replace("\\", "/");
+                        if !normalized.is_empty() {
+                            dirs.push(normalized);
+                        }
+                    }
+
+                    // Dive deeper into sub-folders
+                    walk_dirs_recursive(&path, base_path, dirs);
+                }
+            }
+        }
+    }
+}
+
+pub async fn list_directories(Json(payload): Json<DirPayload>) -> Json<ApiResponse<Vec<String>>> {
+    let dir_path = Path::new(&payload.target_folder);
+
+    if !dir_path.exists() || !dir_path.is_dir() {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("Directory not found".into()),
+        });
+    }
+
+    let mut dirs = Vec::new();
+
+    // Kick off the folder search
+    walk_dirs_recursive(dir_path, dir_path, &mut dirs);
+
+    // Sort alphabetically so the dropdown looks clean
+    dirs.sort();
+
+    Json(ApiResponse {
+        success: true,
+        data: Some(dirs),
+        error: None,
+    })
 }

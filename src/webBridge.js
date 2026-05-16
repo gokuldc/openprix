@@ -84,21 +84,54 @@ const webPickFile = (accept = "*") => {
 
 const osNetworkCalls = {
     // Passes targetFolder to the backend so Rust knows exactly where to save it
-    uploadFileWeb: async (fileName, base64Data, targetFolder = null) => {
-        const res = await restCall('POST', '/api/os/upload', {
-            filename: fileName,
-            base64: base64Data,
-            targetFolder
-        });
-        // We just return the string path on success so the React components can save it to DB
-        return res.success ? res.data : res;
+    uploadFileWeb: async (fileObject, targetFolder = null) => {
+        const formData = new FormData();
+        // Append the folder FIRST so Rust knows where to stream the bytes!
+        formData.append('targetFolder', targetFolder || "null");
+        formData.append('file', fileObject);
+
+        try {
+            // Note: We DO NOT use our standard restCall here because we CANNOT set
+            // the 'Content-Type': 'application/json' header. The browser must set 
+            // 'multipart/form-data' automatically with its unique payload boundary.
+            const res = await fetch(`${SERVER_URL}/api/os/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const rawText = await res.text();
+            let json;
+            try { json = JSON.parse(rawText); } catch (e) { return { success: false, error: rawText }; }
+
+            return json.success !== false ? (json.data !== undefined ? json.data : json) : json;
+        } catch (e) {
+            return { success: false, error: e.message };
+        }
     },
 
-    openFile: (path) => restCall('POST', '/api/os/open', { path }),
+    // Smart Routing for File Opening
+    openFile: async (filePath) => {
+        if (isTauri) {
+            // If running on the Desktop Host App, launch AutoCAD/PDF Viewer natively on the server monitor
+            return restCall('POST', '/api/os/open', { path: filePath });
+        } else {
+            // LIVE STREAM TO MOBILE / WEB BROWSER
+            const streamUrl = `${SERVER_URL}/api/os/download?path=${encodeURIComponent(filePath)}`;
+            window.open(streamUrl, '_blank');
+            return { success: true };
+        }
+    },
+
+    scanDirectory: (targetFolder, ignoredExtensions = []) => {
+        return restCall('POST', '/api/os/scan', { targetFolder, ignoredExtensions });
+    },
+    listDirectories: (targetFolder) => {
+        return restCall('POST', '/api/os/dirs', { targetFolder });
+    },
 
     scaffoldProject: (payload) => restCall('POST', '/api/os/scaffold', payload),
 
-    renameProjectFolder: (payload) => restCall('POST', '/api/os/rename', payload), // Future proofing
+    renameProjectFolder: (payload) => restCall('POST', '/api/os/rename', payload),
 
     getServerUrl: () => SERVER_URL
 };

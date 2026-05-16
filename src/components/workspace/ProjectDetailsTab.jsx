@@ -397,7 +397,7 @@ export default function ProjectDetailsTab({ project, updateProject, regions, res
         if (!window.api?.os?.scaffoldProject) return alert("Scaffolding is only supported on the Desktop Host App.");
 
         try {
-            // 🔥 FORCE PARSE THE FOLDERS INTO A STRICT ARRAY FOR RUST
+            // Force the folders into a strict Array for Rust
             let safeFolders = [];
             if (Array.isArray(settings.templateFolders)) {
                 safeFolders = settings.templateFolders;
@@ -413,10 +413,12 @@ export default function ProjectDetailsTab({ project, updateProject, regions, res
 
             const res = await window.api.os.scaffoldProject(payload);
 
-            if (res && res.success) {
+            // 🔥 FIX: Because webBridge unwraps successful data, `res` is just the path string!
+            // If it failed, it will be an object { success: false, error: ... }
+            if (typeof res === 'string') {
                 await updateProject('isScaffolded', 1);
                 await updateProject('isManuallyLinked', 0);
-                await updateProject('scaffoldPath', res.data);
+                await updateProject('scaffoldPath', res);
                 alert("Workspace scaffolded successfully!");
             } else {
                 alert("Failed to scaffold: " + (res?.error || "Unknown error"));

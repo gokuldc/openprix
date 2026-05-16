@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     Box, TextField, Button, Typography, Avatar, IconButton,
     MenuItem, Divider, Paper, Grid, Tooltip, List, ListItem,
-    ListItemButton, ListItemIcon, ListItemText, alpha, useTheme
+    ListItemButton, ListItemIcon, ListItemText, alpha, useTheme, Autocomplete, Chip
 } from '@mui/material';
 
 // Icons
@@ -13,8 +13,7 @@ import FolderSpecialIcon from '@mui/icons-material/FolderSpecial';
 import PublicIcon from '@mui/icons-material/Public';
 import MenuIcon from '@mui/icons-material/Menu';
 import MenuOpenIcon from '@mui/icons-material/MenuOpen';
-import SaveIcon from '@mui/icons-material/Save';
-import AccountTreeIcon from '@mui/icons-material/AccountTree'; // Added for Org Tab
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 
 import { debounce } from 'lodash';
 import { useSettings } from '../context/SettingsContext';
@@ -36,13 +35,16 @@ export default function CompanySettings() {
         scaffoldRoot: "",
         scaffoldPathTemplate: "./{TYPE}/{CODE}_{NAME}",
         templateFolders: ["01_Drawings", "02_Permits", "03_Site_Photos", "04_Invoices", "05_Communications"],
-        departments: ["Operations", "Design", "Finance", "Management", "Site Logistics"] // 🔥 Added Defaults
+        departments: ["Operations", "Design", "Finance", "Management", "Site Logistics"],
+
+        // 🔥 PHASE 1: NEW FILE MANAGEMENT RULES STATE
+        trackedExtensions: [".dwg", ".skp", ".rvt", ".std", ".edb", ".pdf", ".xlsx", ".docx", ".doc"],
+        ignoredExtensions: [".bak", ".skb", ".tmp", ".log", ".err", ".ini", ".ds$"],
+        mediaExtensions: [".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".avi"]
     });
 
     const [newFolderName, setNewFolderName] = useState("");
     const [selectedParent, setSelectedParent] = useState("");
-
-    // 🔥 New State for Departments
     const [newDeptName, setNewDeptName] = useState("");
 
     // --- DEBOUNCED AUTO-SAVE ---
@@ -64,7 +66,14 @@ export default function CompanySettings() {
 
     const updateInfoList = (field, updatedList) => {
         setInfo(prev => {
-            const updated = { ...prev, [field]: updatedList };
+            // Ensure elements are trimmed strings and formatted correctly for extensions
+            const cleanList = updatedList.map(item => {
+                let str = String(item).trim().toLowerCase();
+                if (field.includes('Extensions') && !str.startsWith('.') && str.length > 0) str = `.${str}`;
+                return str;
+            }).filter(Boolean);
+
+            const updated = { ...prev, [field]: cleanList };
             debouncedSave(updated);
             return updated;
         });
@@ -73,17 +82,25 @@ export default function CompanySettings() {
     useEffect(() => {
         window.api.db.getSettings('company_info').then(data => {
             if (data) {
-                let parsedFolders = data.templateFolders || ["01_Drawings", "02_Permits", "03_Site_Photos", "04_Invoices", "05_Communications"];
-                if (typeof parsedFolders === 'string') parsedFolders = parsedFolders.split(',').map(s => s.trim());
-
-                let parsedDepts = data.departments || ["Operations", "Design", "Finance", "Management", "Site Logistics"];
-                if (typeof parsedDepts === 'string') parsedDepts = parsedDepts.split(',').map(s => s.trim());
+                // Safe parsing for arrays stored as strings
+                const safeParseArray = (val, fallback) => {
+                    if (!val) return fallback;
+                    if (Array.isArray(val)) return val;
+                    if (typeof val === 'string') return val.split(',').map(s => s.trim()).filter(Boolean);
+                    return fallback;
+                };
 
                 setInfo(prev => ({
                     ...prev,
                     ...data,
-                    templateFolders: parsedFolders,
-                    departments: parsedDepts, // 🔥 Bind dynamic departments
+                    templateFolders: safeParseArray(data.templateFolders, prev.templateFolders),
+                    departments: safeParseArray(data.departments, prev.departments),
+
+                    // 🔥 PHASE 1: LOAD SAVED EXTENSION RULES
+                    trackedExtensions: safeParseArray(data.trackedExtensions, prev.trackedExtensions),
+                    ignoredExtensions: safeParseArray(data.ignoredExtensions, prev.ignoredExtensions),
+                    mediaExtensions: safeParseArray(data.mediaExtensions, prev.mediaExtensions),
+
                     currencySymbol: data.currencySymbol || "₹",
                     currencyLocale: data.currencyLocale || "en-IN",
                     unitSystem: data.unitSystem || "Metric",
@@ -127,7 +144,6 @@ export default function CompanySettings() {
         }
     };
 
-    // 🔥 Department Handlers
     const handleAddDept = () => {
         if (!newDeptName.trim()) return;
         const cleanName = newDeptName.trim();
@@ -144,66 +160,31 @@ export default function CompanySettings() {
 
     const NAV_ITEMS = [
         { id: "profile", label: "COMPANY PROFILE", icon: <BusinessIcon />, color: '#3b82f6' },
-        { id: "organization", label: "ORGANIZATION DEPARTMENTS", icon: <AccountTreeIcon />, color: '#8b5cf6' }, // 🔥 Added Tab
+        { id: "organization", label: "ORGANIZATION DEPARTMENTS", icon: <AccountTreeIcon />, color: '#8b5cf6' },
         { id: "regional", label: "REGIONAL STANDARDS", icon: <PublicIcon />, color: '#10b981' },
-        { id: "automation", label: "FILE AUTOMATION", icon: <FolderSpecialIcon />, color: '#f59e0b' },
+        { id: "automation", label: "FILE AUTOMATION & RULES", icon: <FolderSpecialIcon />, color: '#f59e0b' }, // 🔥 Updated label
     ];
 
     return (
         <Box sx={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>
 
-            {/* SIDEBAR */}
-            <Paper
-                elevation={0}
-                sx={{
-                    width: sidebarOpen ? SIDEBAR_OPEN_WIDTH : { xs: 0, md: SIDEBAR_CLOSED_WIDTH },
-                    flexShrink: 0,
-                    bgcolor: 'rgba(13, 31, 60, 0.5)',
-                    borderRight: '1px solid', borderColor: 'divider',
-                    transition: 'width 0.225s cubic-bezier(0.4, 0, 0.2, 1)',
-                    overflowX: 'hidden',
-                    display: 'flex', flexDirection: 'column',
-                    position: { xs: 'fixed', md: 'relative' },
-                    height: '100%',
-                    zIndex: { xs: 1100, md: 1 },
-                    left: 0, top: 0
-                }}
-            >
+            <Paper elevation={0} sx={{ width: sidebarOpen ? SIDEBAR_OPEN_WIDTH : { xs: 0, md: SIDEBAR_CLOSED_WIDTH }, flexShrink: 0, bgcolor: 'rgba(13, 31, 60, 0.5)', borderRight: '1px solid', borderColor: 'divider', transition: 'width 0.225s cubic-bezier(0.4, 0, 0.2, 1)', overflowX: 'hidden', display: 'flex', flexDirection: 'column', position: { xs: 'fixed', md: 'relative' }, height: '100%', zIndex: { xs: 1100, md: 1 }, left: 0, top: 0 }}>
                 <Box sx={{ p: 1, display: 'flex', justifyContent: sidebarOpen ? 'flex-end' : 'center', alignItems: 'center', height: 60 }}>
                     <IconButton onClick={() => setSidebarOpen(!sidebarOpen)} sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
                         {sidebarOpen ? <MenuOpenIcon /> : <MenuIcon />}
                     </IconButton>
                 </Box>
-
-                <Box sx={{
-                    flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', pb: 2,
-                    scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' }
-                }}>
+                <Box sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', pb: 2, scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}>
                     <List sx={{ px: 1 }}>
                         <Typography variant="caption" sx={{ px: sidebarOpen ? 2 : 0, pt: 1, pb: 1, display: 'block', fontFamily: "'JetBrains Mono', monospace", fontWeight: 'bold', color: 'text.secondary', textAlign: sidebarOpen ? 'left' : 'center', opacity: sidebarOpen ? 0.6 : 0 }}>
                             {sidebarOpen ? "SYSTEM CONFIG" : ""}
                         </Typography>
-
                         {NAV_ITEMS.map((item) => (
                             <Tooltip key={item.id} title={!sidebarOpen ? item.label : ""} placement="right" disableInteractive>
                                 <ListItem disablePadding sx={{ mb: 0.5 }}>
-                                    <ListItemButton
-                                        onClick={() => { setActiveTab(item.id); if (window.innerWidth < 900) setSidebarOpen(false); }}
-                                        selected={activeTab === item.id}
-                                        sx={{
-                                            borderRadius: 1.5, minHeight: 40, justifyContent: sidebarOpen ? 'initial' : 'center', px: 2.5,
-                                            '&.Mui-selected': { bgcolor: alpha(item.color, 0.15) },
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
-                                        }}
-                                    >
-                                        <ListItemIcon sx={{ minWidth: 0, mr: sidebarOpen ? 2 : 'auto', justifyContent: 'center', color: activeTab === item.id ? item.color : 'text.secondary' }}>
-                                            {item.icon}
-                                        </ListItemIcon>
-                                        <ListItemText
-                                            primary={item.label}
-                                            sx={{ opacity: sidebarOpen ? 1 : 0, transition: 'opacity 0.2s', m: 0 }}
-                                            primaryTypographyProps={{ sx: { fontFamily: "'Inter', sans-serif", fontSize: '13px', fontWeight: activeTab === item.id ? 'bold' : 'normal', color: activeTab === item.id ? item.color : 'text.primary', whiteSpace: 'nowrap' } }}
-                                        />
+                                    <ListItemButton onClick={() => { setActiveTab(item.id); if (window.innerWidth < 900) setSidebarOpen(false); }} selected={activeTab === item.id} sx={{ borderRadius: 1.5, minHeight: 40, justifyContent: sidebarOpen ? 'initial' : 'center', px: 2.5, '&.Mui-selected': { bgcolor: alpha(item.color, 0.15) }, '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' } }}>
+                                        <ListItemIcon sx={{ minWidth: 0, mr: sidebarOpen ? 2 : 'auto', justifyContent: 'center', color: activeTab === item.id ? item.color : 'text.secondary' }}>{item.icon}</ListItemIcon>
+                                        <ListItemText primary={item.label} sx={{ opacity: sidebarOpen ? 1 : 0, transition: 'opacity 0.2s', m: 0 }} primaryTypographyProps={{ sx: { fontFamily: "'Inter', sans-serif", fontSize: '13px', fontWeight: activeTab === item.id ? 'bold' : 'normal', color: activeTab === item.id ? item.color : 'text.primary', whiteSpace: 'nowrap' } }} />
                                     </ListItemButton>
                                 </ListItem>
                             </Tooltip>
@@ -212,15 +193,10 @@ export default function CompanySettings() {
                 </Box>
             </Paper>
 
-            {/* MAIN CONTENT AREA */}
             <Box sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', overflowX: 'hidden', p: { xs: 2, md: 4 } }}>
-
-                {/* DYNAMIC HEADER */}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4, pb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <IconButton onClick={() => setSidebarOpen(true)} sx={{ display: { xs: 'block', md: 'none' }, color: 'text.secondary' }}>
-                            <MenuIcon />
-                        </IconButton>
+                        <IconButton onClick={() => setSidebarOpen(true)} sx={{ display: { xs: 'block', md: 'none' }, color: 'text.secondary' }}><MenuIcon /></IconButton>
                         <Typography variant="h4" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: { xs: '18px', md: '22px' } }}>
                             SETTINGS: <span style={{ color: theme.palette.primary.main }}>{activeTab.toUpperCase()}</span>
                         </Typography>
@@ -232,9 +208,7 @@ export default function CompanySettings() {
                         <Grid container spacing={3}>
                             <Grid item xs={12}>
                                 <Box display="flex" alignItems="center" gap={3} mb={2}>
-                                    <Avatar src={info.logo} variant="rounded" sx={{ width: 100, height: 100, bgcolor: 'rgba(0,0,0,0.3)', border: '1px dashed rgba(255,255,255,0.2)' }}>
-                                        <BusinessIcon sx={{ fontSize: 40, opacity: 0.2 }} />
-                                    </Avatar>
+                                    <Avatar src={info.logo} variant="rounded" sx={{ width: 100, height: 100, bgcolor: 'rgba(0,0,0,0.3)', border: '1px dashed rgba(255,255,255,0.2)' }}><BusinessIcon sx={{ fontSize: 40, opacity: 0.2 }} /></Avatar>
                                     <Box>
                                         <Button variant="outlined" startIcon={<CloudUploadIcon />} onClick={handleLogoUpload} size="small" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>UPLOAD LOGO</Button>
                                         <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1, fontFamily: "'JetBrains Mono', monospace" }}>Required for PDF report branding.</Typography>
@@ -250,34 +224,24 @@ export default function CompanySettings() {
                         </Grid>
                     )}
 
-                    {/* 🔥 NEW ORGANIZATION TAB */}
                     {activeTab === "organization" && (
                         <Grid container spacing={3}>
                             <Grid item xs={12}>
                                 <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "'JetBrains Mono', monospace", mb: 2, display: 'block' }}>DEPARTMENT CONFIGURATION</Typography>
                                 <Grid container spacing={2}>
-                                    <Grid item xs={12} md={8}>
-                                        <TextField fullWidth size="small" label="New Department Name" value={newDeptName} onChange={e => setNewDeptName(e.target.value)} />
-                                    </Grid>
-                                    <Grid item xs={12} md={4}>
-                                        <Button fullWidth variant="outlined" onClick={handleAddDept} sx={{ fontFamily: "'JetBrains Mono', monospace", height: '40px' }}>ADD_DEPARTMENT</Button>
-                                    </Grid>
+                                    <Grid item xs={12} md={8}><TextField fullWidth size="small" label="New Department Name" value={newDeptName} onChange={e => setNewDeptName(e.target.value)} /></Grid>
+                                    <Grid item xs={12} md={4}><Button fullWidth variant="outlined" onClick={handleAddDept} sx={{ fontFamily: "'JetBrains Mono', monospace", height: '40px' }}>ADD_DEPARTMENT</Button></Grid>
                                 </Grid>
                             </Grid>
-
                             <Grid item xs={12}>
                                 <Paper sx={{ p: 2, bgcolor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', maxHeight: 500, overflowY: 'auto' }}>
                                     {info.departments.map(dept => (
                                         <Box key={dept} display="flex" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5, p: 0.8, borderLeft: '2px solid rgba(255,255,255,0.1)', bgcolor: 'rgba(255,255,255,0.02)', borderRadius: 1 }}>
-                                            <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>
-                                                ❖ {dept}
-                                            </Typography>
+                                            <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>❖ {dept}</Typography>
                                             <IconButton size="small" color="error" onClick={() => handleRemoveDept(dept)}><DeleteIcon sx={{ fontSize: '16px' }} /></IconButton>
                                         </Box>
                                     ))}
-                                    {info.departments.length === 0 && (
-                                        <Typography variant="caption" color="text.secondary" align="center" display="block" sx={{ py: 3, fontStyle: 'italic' }}>No custom departments configured.</Typography>
-                                    )}
+                                    {info.departments.length === 0 && <Typography variant="caption" color="text.secondary" align="center" display="block" sx={{ py: 3, fontStyle: 'italic' }}>No custom departments configured.</Typography>}
                                 </Paper>
                             </Grid>
                         </Grid>
@@ -294,6 +258,8 @@ export default function CompanySettings() {
 
                     {activeTab === "automation" && (
                         <Grid container spacing={3}>
+
+                            {/* HOST & SCAFFOLDING */}
                             <Grid item xs={12}>
                                 <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.primary.main, 0.05), border: '1px solid', borderColor: alpha(theme.palette.primary.main, 0.2), borderRadius: 2 }}>
                                     <Typography variant="caption" color="primary.main" fontWeight="bold" sx={{ display: 'block', mb: 1, fontFamily: "'JetBrains Mono', monospace" }}>HOST_SCAFFOLD_ROOT</Typography>
@@ -310,6 +276,45 @@ export default function CompanySettings() {
 
                             <Grid item xs={12}><Divider sx={{ opacity: 0.1 }} /></Grid>
 
+                            {/* 🔥 PHASE 1: FILE EXTENSION RULES */}
+                            <Grid item xs={12}>
+                                <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "'JetBrains Mono', monospace", mb: 2, display: 'block' }}>FILE EXTENSION TRACKING RULES</Typography>
+                                <Typography variant="caption" color="text.secondary" sx={{ mb: 3, display: 'block' }}>Configure which extensions OPENPRIX should actively track as documents, mark as media, or ignore entirely (like .bak files).</Typography>
+
+                                <Grid container spacing={3}>
+                                    <Grid item xs={12} md={4}>
+                                        <Autocomplete
+                                            multiple freeSolo options={[]}
+                                            value={info.trackedExtensions}
+                                            onChange={(e, newVal) => updateInfoList('trackedExtensions', newVal)}
+                                            renderTags={(value, getTagProps) => value.map((option, index) => <Chip variant="filled" color="success" size="small" label={option} {...getTagProps({ index })} />)}
+                                            renderInput={(params) => <TextField {...params} label="TRACKED DOCUMENTS" size="small" helperText="Registers as Document Revisions" />}
+                                        />
+                                    </Grid>
+                                    <Grid item xs={12} md={4}>
+                                        <Autocomplete
+                                            multiple freeSolo options={[]}
+                                            value={info.mediaExtensions}
+                                            onChange={(e, newVal) => updateInfoList('mediaExtensions', newVal)}
+                                            renderTags={(value, getTagProps) => value.map((option, index) => <Chip variant="filled" color="info" size="small" label={option} {...getTagProps({ index })} />)}
+                                            renderInput={(params) => <TextField {...params} label="MEDIA & GALLERY" size="small" helperText="Registers as Site Photos/Videos" />}
+                                        />
+                                    </Grid>
+                                    <Grid item xs={12} md={4}>
+                                        <Autocomplete
+                                            multiple freeSolo options={[]}
+                                            value={info.ignoredExtensions}
+                                            onChange={(e, newVal) => updateInfoList('ignoredExtensions', newVal)}
+                                            renderTags={(value, getTagProps) => value.map((option, index) => <Chip variant="filled" color="error" size="small" label={option} {...getTagProps({ index })} />)}
+                                            renderInput={(params) => <TextField {...params} label="IGNORED / JUNK FILES" size="small" helperText="Hidden from Scanners (.bak, .log)" />}
+                                        />
+                                    </Grid>
+                                </Grid>
+                            </Grid>
+
+                            <Grid item xs={12}><Divider sx={{ opacity: 0.1 }} /></Grid>
+
+                            {/* FOLDER TEMPLATE BUILDER */}
                             <Grid item xs={12}>
                                 <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "'JetBrains Mono', monospace", mb: 2, display: 'block' }}>PROJECT FOLDER TEMPLATE BUILDER</Typography>
                                 <Grid container spacing={2}>

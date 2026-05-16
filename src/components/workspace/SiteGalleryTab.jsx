@@ -1,5 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Box, Typography, Grid, Paper, Button, IconButton, Dialog, DialogContent, Checkbox, Autocomplete, TextField } from '@mui/material';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import {
+    Box, Typography, Grid, Paper, Button, IconButton, Dialog, DialogContent,
+    Checkbox, Autocomplete, TextField, Tabs, Tab, Chip
+} from '@mui/material';
+
+// Icons
 import AddAPhotoIcon from '@mui/icons-material/AddAPhoto';
 import DeleteIcon from '@mui/icons-material/Delete';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
@@ -8,44 +13,68 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CloseIcon from '@mui/icons-material/Close';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
+import VideoFileIcon from '@mui/icons-material/VideoFile';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 
-// 🔥 IMPORT REACT QUERY
 import { useProject } from '../../hooks/useQueries';
 
-const SmartImage = ({ filePath, alt, style }) => {
+// 🔥 PHASE 4: UPGRADED SMART MEDIA COMPONENT
+const SmartMedia = ({ filePath, alt, style, isThumbnail = false }) => {
     const [src, setSrc] = useState(null);
+    const isVideo = /\.(mp4|mov|webm|ogg|avi)$/i.test(filePath || alt);
 
     useEffect(() => {
         let isMounted = true;
-        const resolveImage = async () => {
+        const resolveMedia = async () => {
             const isDesktop = navigator.userAgent.toLowerCase().includes('electron');
-            if (isDesktop && window.api?.os?.getBase64) {
+
+            // For images on Desktop, try base64 first for speed
+            if (!isVideo && isDesktop && window.api?.os?.getBase64) {
                 try {
                     const b64 = await window.api.os.getBase64(filePath);
                     if (b64 && isMounted) {
                         setSrc(b64);
                         return;
                     }
-                } catch (e) { console.error("Local image load failed:", e); }
+                } catch (e) { }
             }
 
+            // Fallback & Video Streaming: Use the HTTP Download/Stream Endpoint
             if (isMounted) {
-                const targetUrl = sessionStorage.getItem('openprix_server_url') || 'http://127.0.0.1:3000';
+                const targetUrl = window.api?.os?.getServerUrl ? window.api.os.getServerUrl() : 'http://127.0.0.1:3000';
                 setSrc(`${targetUrl}/api/os/download?path=${encodeURIComponent(filePath)}`);
             }
         };
 
-        resolveImage();
+        resolveMedia();
         return () => { isMounted = false; };
-    }, [filePath]);
+    }, [filePath, isVideo]);
 
     if (!src) return (
         <Box sx={{ ...style, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'rgba(0,0,0,0.5)' }}>
             <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>
-                LOADING_IMG...
+                LOADING_MEDIA...
             </Typography>
         </Box>
     );
+
+    if (isVideo) {
+        return (
+            <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
+                <video
+                    src={src}
+                    style={{ ...style, objectFit: 'contain', backgroundColor: '#000' }}
+                    controls={!isThumbnail} // Hide controls on thumbnails, show in fullscreen
+                    preload="metadata"
+                />
+                {isThumbnail && (
+                    <PlayCircleOutlineIcon sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: 50, color: 'rgba(255,255,255,0.7)', pointerEvents: 'none' }} />
+                )}
+            </Box>
+        );
+    }
+
     return <img src={src} alt={alt} style={style} />;
 };
 
@@ -54,47 +83,74 @@ export default function SiteGalleryTab({ projectId }) {
     const { data: rawProject } = useProject(projectId);
     const project = rawProject || {};
 
-    const [photos, setPhotos] = useState([]);
+    const [media, setMedia] = useState([]);
     const [selectedImg, setSelectedImg] = useState(null);
     const [uploadProgress, setUploadProgress] = useState({ uploading: false, current: 0, total: 0 });
     const [selectedIds, setSelectedIds] = useState([]);
 
-    // 🔥 DYNAMIC FOLDER TARGET STATE
-    const [templateFolders, setTemplateFolders] = useState(["Site Photos", "Progress", "Defects"]);
-    const [category, setCategory] = useState("Site Photos");
+    // Server Directories & Albums
+    const [templateFolders, setTemplateFolders] = useState([]);
+    const [uploadTarget, setUploadTarget] = useState("");
+    const [activeAlbum, setActiveAlbum] = useState("All");
 
     const fileInputRef = useRef(null);
 
-    const loadPhotos = async () => {
+    const loadMedia = async () => {
         const docs = await window.api.db.getProjectDocuments(projectId);
-        // The gallery renders all image types regardless of which custom category folder they were put in
-        const images = docs.filter(d => /\.(jpg|jpeg|png|webp|gif)$/i.test(d.name) || /\.(jpg|jpeg|png|webp|gif)$/i.test(d.filePath));
-        setPhotos(images);
+        // Include both images and videos
+        const filtered = docs.filter(d => /\.(jpg|jpeg|png|webp|gif|mp4|mov|webm|avi)$/i.test(d.name) || /\.(jpg|jpeg|png|webp|gif|mp4|mov|webm|avi)$/i.test(d.filePath));
+        setMedia(filtered);
     };
 
     useEffect(() => {
-        loadPhotos();
-        // Fetch the global folder template from settings
-        window.api.db.getSettings('folder_template').then(res => {
-            if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
-                setTemplateFolders(res.data);
-                // Smart auto-select a photo-related folder if it exists
-                const photoFolder = res.data.find(c => c.toLowerCase().includes('photo') || c.toLowerCase().includes('gallery'));
-                if (photoFolder) setCategory(photoFolder);
+        loadMedia();
+
+        const fetchFolders = async () => {
+            if (project?.isScaffolded && project?.scaffoldPath) {
+                try {
+                    const res = await window.api.os.listDirectories(project.scaffoldPath);
+                    if (Array.isArray(res) && res.length > 0) {
+                        setTemplateFolders(res);
+                        const photoFolder = res.find(c => c.toLowerCase().includes('photo') || c.toLowerCase().includes('gallery') || c.toLowerCase().includes('site'));
+                        if (photoFolder) setUploadTarget(photoFolder);
+                        return;
+                    }
+                } catch (err) { console.error("Failed to read live directories:", err); }
             }
-        });
-    }, [projectId]);
+
+            const res = await window.api.db.getSettings('company_info');
+            if (res && res.data && Array.isArray(res.data.templateFolders)) {
+                setTemplateFolders(res.data.templateFolders);
+                const photoFolder = res.data.templateFolders.find(c => c.toLowerCase().includes('photo') || c.toLowerCase().includes('gallery'));
+                if (photoFolder) setUploadTarget(photoFolder);
+            }
+        };
+
+        fetchFolders();
+    }, [projectId, project?.scaffoldPath]);
+
+    // Group media into unique Albums (Categories/Folders)
+    const albums = useMemo(() => {
+        const uniqueCategories = [...new Set(media.map(m => m.category))].filter(Boolean).sort();
+        return ["All", ...uniqueCategories];
+    }, [media]);
+
+    // Filter media by the active tab
+    const displayedMedia = useMemo(() => {
+        if (activeAlbum === "All") return media;
+        return media.filter(m => m.category === activeAlbum);
+    }, [media, activeAlbum]);
 
     useEffect(() => {
         if (!selectedImg) return;
         const handleKeyDown = (e) => {
-            const currentIndex = photos.findIndex(p => p.id === selectedImg.id);
-            if (e.key === 'ArrowRight') setSelectedImg(currentIndex < photos.length - 1 ? photos[currentIndex + 1] : photos[0]);
-            if (e.key === 'ArrowLeft') setSelectedImg(currentIndex > 0 ? photos[currentIndex - 1] : photos[photos.length - 1]);
+            const currentIndex = displayedMedia.findIndex(p => p.id === selectedImg.id);
+            if (e.key === 'ArrowRight') setSelectedImg(currentIndex < displayedMedia.length - 1 ? displayedMedia[currentIndex + 1] : displayedMedia[0]);
+            if (e.key === 'ArrowLeft') setSelectedImg(currentIndex > 0 ? displayedMedia[currentIndex - 1] : displayedMedia[displayedMedia.length - 1]);
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedImg, photos]);
+    }, [selectedImg, displayedMedia]);
 
     const handleFileChange = async (e) => {
         const files = Array.from(e.target.files);
@@ -104,56 +160,45 @@ export default function SiteGalleryTab({ projectId }) {
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
-
-            const base64Data = await new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (evt) => resolve(evt.target.result);
-                reader.readAsDataURL(file);
-            });
+            const extension = file.name.split('.').pop().toLowerCase();
 
             try {
-                // 🔥 HOST SERVER ROUTING LOGIC
                 let targetFolder = undefined;
                 if (project?.isScaffolded && project?.scaffoldPath) {
                     const basePath = project.scaffoldPath.replace(/[/\\]$/, '');
-                    targetFolder = `${basePath}/${category}`;
+                    targetFolder = `${basePath}/${uploadTarget}`;
                 }
 
-                // Send to Rust backend with specific folder target
-                const res = await window.api.os.uploadFileWeb(file.name, base64Data, targetFolder);
-                const filePath = (res && typeof res === 'string') ? res : null;
+                // 🔥 Pass the raw 'file' object directly! No base64 conversions!
+                const res = await window.api.os.uploadFileWeb(file, targetFolder);
 
-                if (filePath) {
+                if (typeof res === 'string') {
                     await window.api.db.saveProjectDocument({
-                        id: window.crypto.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2),
+                        id: crypto.randomUUID(),
                         projectId,
-                        name: file.name,
-                        category: category, // 🔥 Use the selected dynamic category
-                        filePath,
-                        fileType: 'image',
+                        name: file.name.replace(/\.[^/.]+$/, ""),
+                        category: uploadTarget,
+                        filePath: res,
+                        fileType: extension,
                         addedAt: Date.now()
                     });
-                } else {
-                    console.error("Upload failed for:", file.name, res);
                 }
-            } catch (err) {
-                console.error("Upload error for:", file.name, err);
-            }
+            } catch (err) { console.error("Upload error:", err); }
 
             setUploadProgress(prev => ({ ...prev, current: i + 1 }));
         }
 
         setUploadProgress({ uploading: false, current: 0, total: 0 });
-        loadPhotos();
-        e.target.value = '';
+        loadMedia();
+        if (fileInputRef.current) fileInputRef.current.value = null;
     };
 
     const handleDelete = async (id, e) => {
         e.stopPropagation();
-        if (window.confirm("Remove this photo from the gallery tracker? (The file remains on the host server)")) {
+        if (window.confirm("Remove this media from the gallery tracker? (The file remains on the host server)")) {
             await window.api.db.deleteProjectDocument(id);
             setSelectedIds(prev => prev.filter(selectedId => selectedId !== id));
-            loadPhotos();
+            loadMedia();
         }
     };
 
@@ -164,78 +209,81 @@ export default function SiteGalleryTab({ projectId }) {
 
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
-        if (window.confirm(`Remove ${selectedIds.length} selected photos from the gallery tracker?`)) {
+        if (window.confirm(`Remove ${selectedIds.length} selected items from the tracker?`)) {
             for (const id of selectedIds) {
                 await window.api.db.deleteProjectDocument(id);
             }
             setSelectedIds([]);
-            loadPhotos();
+            loadMedia();
         }
     };
 
     const handleNext = () => {
-        const currentIndex = photos.findIndex(p => p.id === selectedImg.id);
-        setSelectedImg(currentIndex < photos.length - 1 ? photos[currentIndex + 1] : photos[0]);
+        const currentIndex = displayedMedia.findIndex(p => p.id === selectedImg.id);
+        setSelectedImg(currentIndex < displayedMedia.length - 1 ? displayedMedia[currentIndex + 1] : displayedMedia[0]);
     };
 
     const handlePrev = () => {
-        const currentIndex = photos.findIndex(p => p.id === selectedImg.id);
-        setSelectedImg(currentIndex > 0 ? photos[currentIndex - 1] : photos[photos.length - 1]);
+        const currentIndex = displayedMedia.findIndex(p => p.id === selectedImg.id);
+        setSelectedImg(currentIndex > 0 ? displayedMedia[currentIndex - 1] : displayedMedia[displayedMedia.length - 1]);
     };
 
     return (
         <Box>
-            <input type="file" accept="image/*" multiple ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} />
+            {/* 🔥 PHASE 4: ACCEPT VIDEOS AND IMAGES */}
+            <input type="file" accept="image/*,video/*" multiple ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} />
 
-            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'center' }, mb: 3, gap: 2 }}>
-                <Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '14px' }}>
-                    // SITE_VISUAL_LOG ({photos.length})
-                </Typography>
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', lg: 'center' }, mb: 3, gap: 2 }}>
+                <Box>
+                    <Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '14px', display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <PhotoLibraryIcon color="primary" /> PROJECT MEDIA GALLERY
+                    </Typography>
+                </Box>
 
-                <Box display="flex" gap={2} flexWrap="wrap">
-                    {selectedIds.length > 0 ? (
-                        <Button
-                            variant="contained" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete}
-                            sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}
-                        >
+                <Box display="flex" gap={2} flexWrap="wrap" alignItems="center">
+                    {selectedIds.length > 0 && (
+                        <Button variant="contained" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>
                             DELETE SELECTED ({selectedIds.length})
                         </Button>
-                    ) : null}
+                    )}
 
-                    {/* 🔥 DYNAMIC DIRECTORY SELECTOR */}
+                    {/* 🔥 UPLOAD TARGET DIRECTORY */}
                     <Autocomplete
-                        freeSolo
-                        options={templateFolders}
-                        value={category}
-                        onChange={(e, newVal) => setCategory(newVal || "Site Photos")}
-                        onInputChange={(e, newVal) => setCategory(newVal || "Site Photos")}
+                        freeSolo options={templateFolders} value={uploadTarget}
+                        onChange={(e, newVal) => setUploadTarget(newVal || "Site Photos")}
+                        onInputChange={(e, newVal) => setUploadTarget(newVal || "Site Photos")}
                         sx={{ minWidth: 200 }}
-                        renderInput={(params) => (
-                            <TextField
-                                {...params}
-                                size="small"
-                                label={project?.isScaffolded ? "TARGET DIRECTORY" : "CATEGORY"}
-                                InputLabelProps={{ ...params.InputLabelProps, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' } }}
-                            />
-                        )}
+                        renderInput={(params) => <TextField {...params} size="small" label="UPLOAD DESTINATION ALBUM" InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' } }} />}
                     />
 
-                    <Button
-                        variant="contained" startIcon={<AddAPhotoIcon />} onClick={() => fileInputRef.current.click()} disabled={uploadProgress.uploading}
-                        sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', transition: 'all 0.3s' }}
-                    >
-                        {uploadProgress.uploading ? `UPLOADING (${uploadProgress.current}/${uploadProgress.total})...` : "UPLOAD_SITE_PHOTOS"}
+                    <Button variant="contained" startIcon={<AddAPhotoIcon />} onClick={() => fileInputRef.current.click()} disabled={uploadProgress.uploading} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>
+                        {uploadProgress.uploading ? `UPLOADING (${uploadProgress.current}/${uploadProgress.total})...` : "UPLOAD MEDIA"}
                     </Button>
                 </Box>
             </Box>
 
+            {/* 🔥 ALBUM NAVIGATION TABS */}
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+                <Tabs value={activeAlbum} onChange={(e, newVal) => setActiveAlbum(newVal)} variant="scrollable" scrollButtons="auto" textColor="primary" indicatorColor="primary">
+                    {albums.map(album => (
+                        <Tab
+                            key={album}
+                            value={album}
+                            label={<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', fontWeight: 'bold' }}>{album.toUpperCase()}</Typography>}
+                        />
+                    ))}
+                </Tabs>
+            </Box>
+
             <Grid container spacing={2}>
-                {photos.map((photo) => {
-                    const isSelected = selectedIds.includes(photo.id);
+                {displayedMedia.map((item) => {
+                    const isSelected = selectedIds.includes(item.id);
+                    const isVid = /\.(mp4|mov|webm|ogg|avi)$/i.test(item.fileType || item.filePath);
+
                     return (
-                        <Grid item xs={12} sm={6} md={4} lg={3} key={photo.id}>
+                        <Grid item xs={12} sm={6} md={4} lg={3} key={item.id}>
                             <Paper
-                                onClick={(e) => toggleSelect(photo.id, e)}
+                                onClick={(e) => toggleSelect(item.id, e)}
                                 sx={{
                                     position: 'relative', overflow: 'hidden', borderRadius: 2,
                                     border: isSelected ? '2px solid #3b82f6' : '1px solid',
@@ -245,45 +293,66 @@ export default function SiteGalleryTab({ projectId }) {
                                 }}
                             >
                                 <Checkbox
-                                    icon={<RadioButtonUncheckedIcon sx={{ color: 'rgba(255,255,255,0.7)' }} />}
-                                    checkedIcon={<CheckCircleIcon sx={{ color: '#3b82f6' }} />}
-                                    checked={isSelected}
-                                    onChange={(e) => toggleSelect(photo.id, e)}
-                                    sx={{ position: 'absolute', top: 8, left: 8, zIndex: 10, bgcolor: isSelected ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.4)', borderRadius: 1, p: 0.5, '&:hover': { bgcolor: 'rgba(0,0,0,0.8)' } }}
+                                    icon={<RadioButtonUncheckedIcon sx={{ color: 'rgba(255,255,255,0.7)' }} />} checkedIcon={<CheckCircleIcon sx={{ color: '#3b82f6' }} />}
+                                    checked={isSelected} onChange={(e) => toggleSelect(item.id, e)}
+                                    sx={{ position: 'absolute', top: 8, left: 8, zIndex: 10, bgcolor: isSelected ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.4)', borderRadius: 1, p: 0.5 }}
                                 />
 
-                                <SmartImage filePath={photo.filePath} alt={photo.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                {/* Show Video icon in top right if it's a video */}
+                                {isVid && <VideoFileIcon sx={{ position: 'absolute', top: 12, right: 12, zIndex: 10, color: 'white', filter: 'drop-shadow(0px 2px 4px rgba(0,0,0,0.8))' }} />}
+
+                                <SmartMedia filePath={item.filePath} alt={item.name} isThumbnail={true} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
 
                                 <Box className="overlay" sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', bgcolor: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 2, opacity: isSelected ? 1 : 0, transition: '0.2s' }}>
-                                    <IconButton color="primary" sx={{ bgcolor: 'rgba(0,0,0,0.7)', '&:hover': { bgcolor: '#000' } }} onClick={(e) => { e.stopPropagation(); setSelectedImg(photo); }}>
+                                    <IconButton color="primary" sx={{ bgcolor: 'rgba(0,0,0,0.7)', '&:hover': { bgcolor: '#000' } }} onClick={(e) => { e.stopPropagation(); setSelectedImg(item); }}>
                                         <FullscreenIcon />
                                     </IconButton>
-                                    <IconButton color="error" sx={{ bgcolor: 'rgba(0,0,0,0.7)', '&:hover': { bgcolor: '#000' } }} onClick={(e) => handleDelete(photo.id, e)}>
+                                    <IconButton color="error" sx={{ bgcolor: 'rgba(0,0,0,0.7)', '&:hover': { bgcolor: '#000' } }} onClick={(e) => handleDelete(item.id, e)}>
                                         <DeleteIcon />
                                     </IconButton>
+                                </Box>
+
+                                <Box sx={{ position: 'absolute', bottom: 0, left: 0, width: '100%', bgcolor: 'rgba(0,0,0,0.7)', p: 0.5, px: 1 }}>
+                                    <Typography variant="caption" noWrap sx={{ color: 'white', fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', display: 'block' }}>
+                                        {item.name}
+                                    </Typography>
                                 </Box>
                             </Paper>
                         </Grid>
                     );
                 })}
+                {displayedMedia.length === 0 && (
+                    <Grid item xs={12}>
+                        <Paper sx={{ p: 5, textAlign: 'center', bgcolor: 'rgba(0,0,0,0.2)', border: '1px dashed rgba(255,255,255,0.1)' }}>
+                            <Typography sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', fontSize: '14px' }}>NO MEDIA IN THIS ALBUM</Typography>
+                        </Paper>
+                    </Grid>
+                )}
             </Grid>
 
-            <Dialog open={Boolean(selectedImg)} onClose={() => setSelectedImg(null)} maxWidth="lg" fullWidth PaperProps={{ sx: { bgcolor: 'transparent', boxShadow: 'none', backgroundImage: 'none' } }}>
-                <DialogContent sx={{ p: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh', position: 'relative', overflow: 'hidden' }}>
+            {/* FULLSCREEN MEDIA MODAL */}
+            <Dialog open={Boolean(selectedImg)} onClose={() => setSelectedImg(null)} maxWidth="xl" fullWidth PaperProps={{ sx: { bgcolor: 'transparent', boxShadow: 'none', backgroundImage: 'none', m: 0 } }}>
+                <DialogContent sx={{ p: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '90vh', position: 'relative', overflow: 'hidden' }}>
                     {selectedImg && (
                         <>
                             <Box sx={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', height: '100%' }}>
-                                <SmartImage filePath={selectedImg.filePath} alt={selectedImg.name} style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', borderRadius: '8px' }} />
+                                <SmartMedia filePath={selectedImg.filePath} alt={selectedImg.name} isThumbnail={false} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '8px' }} />
                             </Box>
+
+                            <Box sx={{ position: 'absolute', top: 16, left: 16, bgcolor: 'rgba(0,0,0,0.6)', p: 1, borderRadius: 1 }}>
+                                <Typography variant="caption" sx={{ color: 'white', fontFamily: "'JetBrains Mono', monospace" }}>{selectedImg.name}</Typography>
+                            </Box>
+
                             <IconButton onClick={() => setSelectedImg(null)} sx={{ position: 'absolute', top: 16, right: 16, color: 'white', bgcolor: 'rgba(0,0,0,0.6)', '&:hover': { bgcolor: 'rgba(255,0,0,0.8)' } }}>
                                 <CloseIcon />
                             </IconButton>
-                            {photos.length > 1 && (
+
+                            {displayedMedia.length > 1 && (
                                 <IconButton onClick={handlePrev} sx={{ position: 'absolute', left: 16, color: 'white', bgcolor: 'rgba(0,0,0,0.6)', '&:hover': { bgcolor: 'rgba(59, 130, 246, 0.8)' } }}>
                                     <ChevronLeftIcon fontSize="large" />
                                 </IconButton>
                             )}
-                            {photos.length > 1 && (
+                            {displayedMedia.length > 1 && (
                                 <IconButton onClick={handleNext} sx={{ position: 'absolute', right: 16, color: 'white', bgcolor: 'rgba(0,0,0,0.6)', '&:hover': { bgcolor: 'rgba(59, 130, 246, 0.8)' } }}>
                                     <ChevronRightIcon fontSize="large" />
                                 </IconButton>
