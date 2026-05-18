@@ -2,91 +2,43 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 
 const AuthContext = createContext();
 
-export function AuthProvider({ children }) {
-    const [currentUser, setCurrentUser] = useState(null);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        try {
-            const savedSession = localStorage.getItem('openprix_session');
-            if (savedSession) {
-                const parsedUser = JSON.parse(savedSession);
-
-                // 🔥 Validate it's an actual user with an access level
-                if (parsedUser && parsedUser.id && parsedUser.accessLevel !== undefined) {
-                    setCurrentUser(parsedUser);
-                } else {
-                    // Wipe the junk data
-                    localStorage.removeItem('openprix_session');
-                }
-            }
-        } catch (e) {
-            console.error("Session parse error, wiping local storage.");
-            localStorage.removeItem('openprix_session');
-        }
-        setLoading(false);
-    }, []);
+export const AuthProvider = ({ children }) => {
+    // 🔥 THE FIX: Initialize state from localStorage so it survives a refresh
+    const [currentUser, setCurrentUser] = useState(() => {
+        const savedUser = localStorage.getItem('openprix_user');
+        return savedUser ? JSON.parse(savedUser) : null;
+    });
 
     const login = async (username, password) => {
-        try {
-            let response;
-
-            // 1. Desktop Environment (Electron)
-            if (window.api && window.api.db && typeof window.api.db.verifyEmployeeLogin === 'function') {
-                response = await window.api.db.verifyEmployeeLogin(username, password);
-            }
-            // 2. Web Browser Environment (Network Hosting)
-            else {
-                const res = await fetch('/api/rpc', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        channel: 'db:verify-login',
-                        args: [username, password]
-                    })
-                });
-                const json = await res.json();
-                response = json.data; // Express wraps the data payload
-            }
-
-            // Check if the response was successful (webBridge returns the user payload directly, or {success: false, error} on fail)
-            if (response && !response.error && (response.id || response.user)) {
-                const userObj = response.user || response; // Handle both old IPC structure and new REST structure
-                setCurrentUser(userObj);
-                localStorage.setItem('openprix_session', JSON.stringify(userObj));
-                return true;
-            } else {
-                console.warn("Login failed:", response?.error || "Unknown error");
-                return false;
-            }
-        } catch (error) {
-            console.error("Login Exception:", error);
-            return false;
+        const res = await window.api.db.verifyEmployeeLogin(username, password);
+        if (res && res.token) {
+            localStorage.setItem('openprix_token', res.token);
+            localStorage.setItem('openprix_user', JSON.stringify(res.user));
+            setCurrentUser(res.user);
+            return true;
         }
+        return false;
     };
 
     const logout = () => {
-        console.log("System Logout Triggered");
-        localStorage.removeItem('openprix_session');
-        setCurrentUser(null); // Instantly kicks user back to Login screen
+        localStorage.removeItem('openprix_token');
+        localStorage.removeItem('openprix_user');
+        setCurrentUser(null);
+        window.location.reload(); // Hard reset to clear all states
     };
 
-    // 🔥 THE NUMERICAL CLEARANCE ENGINE
-    const hasClearance = (minimumLevel) => {
+    // Helper to check clearance
+    const hasClearance = (level) => {
         if (!currentUser) return false;
-
-        // Failsafe: Ensure SuperAdmin string maps to top-tier clearance
-        if (currentUser.role === 'SuperAdmin') return true;
-
-        const userLevel = Number(currentUser.accessLevel || 1);
-        return userLevel >= minimumLevel;
+        // We renamed it to access_level in the Rust struct!
+        return Number(currentUser.access_level) >= Number(level);
     };
 
     return (
-        <AuthContext.Provider value={{ currentUser, login, logout, hasClearance, loading }}>
-            {!loading && children}
+        <AuthContext.Provider value={{ currentUser, login, logout, hasClearance }}>
+            {children}
         </AuthContext.Provider>
     );
-}
+};
 
 export const useAuth = () => useContext(AuthContext);

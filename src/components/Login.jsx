@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Paper, TextField, Button, Typography, Alert } from '@mui/material';
+import { Box, Paper, TextField, Button, Typography, Alert, CircularProgress } from '@mui/material';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import { useAuth } from '../context/AuthContext';
 
@@ -8,14 +8,20 @@ export default function Login() {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false); // Added loading state
 
     const handleLogin = async (e) => {
         e.preventDefault();
         setError('');
+        setLoading(true);
+
         const success = await login(username, password);
+
         if (!success) {
             setError('Invalid credentials or unauthorized access.');
+            setLoading(false);
         }
+        // No need to set loading false on success, as the component will unmount
     };
 
     return (
@@ -31,7 +37,7 @@ export default function Login() {
                     </Typography>
                 </Box>
 
-                {error && <Alert severity="error" sx={{ mb: 3, fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{error}</Alert>}
+                {error && <Alert severity="error" sx={{ mb: 3, fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', bgcolor: 'rgba(211, 47, 47, 0.1)' }}>{error}</Alert>}
 
                 <form onSubmit={handleLogin}>
                     <Box display="flex" flexDirection="column" gap={3}>
@@ -39,6 +45,7 @@ export default function Login() {
                             label="EMPLOYEE ID / USERNAME"
                             variant="outlined"
                             fullWidth
+                            disabled={loading}
                             value={username}
                             onChange={e => setUsername(e.target.value)}
                             InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }}
@@ -48,6 +55,7 @@ export default function Login() {
                             type="password"
                             variant="outlined"
                             fullWidth
+                            disabled={loading}
                             value={password}
                             onChange={e => setPassword(e.target.value)}
                             InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }}
@@ -57,10 +65,11 @@ export default function Login() {
                             variant="contained"
                             size="large"
                             fullWidth
+                            disabled={loading}
                             disableElevation
                             sx={{ mt: 2, py: 1.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px' }}
                         >
-                            AUTHENTICATE
+                            {loading ? <CircularProgress size={24} color="inherit" /> : "AUTHENTICATE"}
                         </Button>
                     </Box>
                 </form>

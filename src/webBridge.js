@@ -15,34 +15,44 @@ if (!window.crypto.randomUUID) {
 const isTauri = '__TAURI_INTERNALS__' in window;
 
 const getTargetUrl = () => {
-    // 1. If we are in Tauri, we MUST rely on the saved connection URL from the portal
     if (isTauri) {
         return localStorage.getItem('openprix_last_server') || 'http://127.0.0.1:3000';
     }
-
-    // 2. 🔥 THE FIX: If we are purely in a web browser and NOT on the Vite dev port (5173),
-    // it means the Rust Daemon is serving us directly. Just use the current URL!
     if (window.location.port !== '5173') {
         return window.location.origin;
     }
-
-    // 3. Vite Dev Server fallback (for testing frontend without compiling)
     return localStorage.getItem('openprix_last_server') || 'http://127.0.0.1:3000';
 };
 
 const SERVER_URL = getTargetUrl();
 console.log(`[OpenPrix] Connecting to Nexus Daemon at: ${SERVER_URL} (Tauri Client: ${isTauri})`);
 
-// 🚀 THE PURE REST CLIENT
+// 🚀 THE PURE REST CLIENT WITH JWT INTERCEPTOR (FIXED: NO RELOAD LOOP)
 const restCall = async (method, endpoint, data = null) => {
     try {
-        const options = { method, headers: { 'Content-Type': 'application/json' } };
+        const headers = { 'Content-Type': 'application/json' };
+
+        const token = localStorage.getItem('openprix_token');
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const options = { method, headers };
         if (data) options.body = JSON.stringify(data);
 
         const res = await fetch(`${SERVER_URL}${endpoint}`, options);
+
+        // 🔥 THE FIX: If server rejects token, just return unauthorized status.
+        // We do NOT call reload() here anymore, preventing the infinite loop.
+        if (res.status === 401) {
+            console.warn("🔒 401 Unauthorized: Access Denied or Session Expired.");
+            localStorage.removeItem('openprix_user');
+            localStorage.removeItem('openprix_token');
+            return { success: false, unauthorized: true, error: "Authentication Required" };
+        }
+
         const json = await res.json();
 
-        // Handle standard success/data wrapping from our Rust routes
         if (json.success === false) throw new Error(json.error || "Server Error");
         return json.data !== undefined ? json.data : json;
     } catch (error) {
@@ -55,14 +65,12 @@ const restCall = async (method, endpoint, data = null) => {
 
 let tauriInvoke = null;
 if (isTauri) {
-    // Dynamically import Tauri core so it doesn't break the pure web version
     import('@tauri-apps/api/core').then(module => {
         tauriInvoke = module.invoke;
     }).catch(err => console.error("Failed to load Tauri API", err));
 }
 
 const tauriOsCalls = {
-    // We will write these exact Rust functions in Phase 4!
     pickFile: () => tauriInvoke ? tauriInvoke('os_pick_file') : null,
     openFile: (filePath) => tauriInvoke ? tauriInvoke('os_open_file', { filePath }) : null,
     getBase64: (filePath) => tauriInvoke ? tauriInvoke('os_get_base64', { filePath }) : null,
@@ -83,19 +91,18 @@ const webPickFile = (accept = "*") => {
 };
 
 const osNetworkCalls = {
-    // Passes targetFolder to the backend so Rust knows exactly where to save it
+    // Admin only - Locked to localhost on server
     uploadFileWeb: async (fileObject, targetFolder = null) => {
         const formData = new FormData();
-        // Append the folder FIRST so Rust knows where to stream the bytes!
         formData.append('targetFolder', targetFolder || "null");
         formData.append('file', fileObject);
 
+        const token = localStorage.getItem('openprix_token');
+
         try {
-            // Note: We DO NOT use our standard restCall here because we CANNOT set
-            // the 'Content-Type': 'application/json' header. The browser must set 
-            // 'multipart/form-data' automatically with its unique payload boundary.
             const res = await fetch(`${SERVER_URL}/api/os/upload`, {
                 method: 'POST',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
                 body: formData
             });
 
@@ -109,13 +116,33 @@ const osNetworkCalls = {
         }
     },
 
-    // Smart Routing for File Opening
+    // 🔥 SECURE SANDBOXED UPLOAD FOR REMOTE CLIENTS
+    uploadProjectDocument: async (projectId, fileObject) => {
+        const formData = new FormData();
+        formData.append('file', fileObject);
+        const token = localStorage.getItem('openprix_token');
+
+        try {
+            const res = await fetch(`${SERVER_URL}/api/projects/${projectId}/upload`, {
+                method: 'POST',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+                body: formData
+            });
+
+            const rawText = await res.text();
+            let json;
+            try { json = JSON.parse(rawText); } catch (e) { return { success: false, error: rawText }; }
+
+            return json.success !== false ? (json.data !== undefined ? json.data : json) : json;
+        } catch (e) {
+            return { success: false, error: e.message };
+        }
+    },
+
     openFile: async (filePath) => {
         if (isTauri) {
-            // If running on the Desktop Host App, launch AutoCAD/PDF Viewer natively on the server monitor
             return restCall('POST', '/api/os/open', { path: filePath });
         } else {
-            // LIVE STREAM TO MOBILE / WEB BROWSER
             const streamUrl = `${SERVER_URL}/api/os/download?path=${encodeURIComponent(filePath)}`;
             window.open(streamUrl, '_blank');
             return { success: true };
@@ -125,6 +152,29 @@ const osNetworkCalls = {
     scanDirectory: (targetFolder, ignoredExtensions = []) => {
         return restCall('POST', '/api/os/scan', { targetFolder, ignoredExtensions });
     },
+
+    sendNotification: async (title, body) => {
+        try {
+            if (isTauri) {
+                const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification');
+                let permissionGranted = await isPermissionGranted();
+                if (!permissionGranted) {
+                    const permission = await requestPermission();
+                    permissionGranted = permission === 'granted';
+                }
+                if (permissionGranted) sendNotification({ title, body });
+            } else {
+                if (!("Notification" in window)) return;
+                if (Notification.permission === "granted") {
+                    new Notification(title, { body });
+                } else if (Notification.permission !== "denied") {
+                    const permission = await Notification.requestPermission();
+                    if (permission === "granted") new Notification(title, { body });
+                }
+            }
+        } catch (err) { console.error("Failed to send notification:", err); }
+    },
+
     listDirectories: (targetFolder) => {
         return restCall('POST', '/api/os/dirs', { targetFolder });
     },
@@ -138,7 +188,7 @@ const osNetworkCalls = {
 
 const webOsFallbacks = {
     pickFile: () => webPickFile(),
-    pickDirectory: async () => prompt("Host Server Path Mapping:\nBecause you are on a remote web browser, please type the absolute path ON THE HOST SERVER where projects should be scaffolded (e.g., C:/OpenPrix/Projects):") || null,
+    pickDirectory: async () => prompt("Host Server Path Mapping:\nType absolute path ON THE HOST SERVER (e.g., C:/Projects):") || null,
     openFile: (filePath) => {
         window.open(`${SERVER_URL}/api/os/download?path=${encodeURIComponent(filePath)}`, '_blank');
     },
@@ -160,65 +210,51 @@ window.api = {
         verifyEmployeeLogin: (un, pw) => restCall('POST', '/api/auth/login', { username: un, password: pw }),
         getSettings: (key) => restCall('GET', `/api/settings/${key}`),
         saveSettings: (key, val) => restCall('POST', `/api/settings/${key}`, { value: val }),
-
         backupDatabase: () => restCall('POST', '/api/db/backup'),
         restoreDatabase: (fileData) => restCall('POST', '/api/db/restore', { data: fileData }),
         purgeDatabase: () => restCall('POST', '/api/db/purge'),
-
         getRegions: () => restCall('GET', '/api/regions'),
         createRegion: (name) => restCall('POST', '/api/regions', { name }),
         deleteRegion: (id) => restCall('DELETE', `/api/regions/${id}`),
-
         getResources: () => restCall('GET', '/api/resources'),
         createResource: (data) => restCall('POST', '/api/resources', data),
         updateResource: (id, f, v) => restCall('PUT', `/api/resources/${id}`, { field: f, value: typeof v === 'object' ? JSON.stringify(v) : String(v) }),
         deleteResource: (id) => restCall('DELETE', `/api/resources/${id}`),
-
         getMasterBoqs: () => restCall('GET', '/api/master-boqs'),
         saveMasterBoq: (p, id, n) => restCall('POST', '/api/master-boqs', { payload: p, id, isNew: n }),
         deleteMasterBoq: (id) => restCall('DELETE', `/api/master-boqs/${id}`),
-
         getProjects: () => restCall('GET', '/api/projects'),
         getProject: (id) => restCall('GET', `/api/projects/${id}`),
         addProject: (data) => restCall('POST', '/api/projects', data),
         updateProject: (id, data) => restCall('PUT', `/api/projects/${id}`, data),
         deleteProject: (id) => restCall('DELETE', `/api/projects/${id}`),
         purgeProjects: () => restCall('POST', '/api/projects/purge'),
-
         getProjectBoqs: (pid) => restCall('GET', `/api/projects/${pid}/boqs`),
         addProjectBoq: (data) => restCall('POST', '/api/boqs', data),
         updateProjectBoq: (id, data) => restCall('PUT', `/api/boqs/${id}`, data),
         deleteProjectBoq: (id) => restCall('DELETE', `/api/boqs/${id}`),
         bulkPutProjectBoqs: (arr) => restCall('PUT', '/api/boqs/bulk', { items: arr }),
-
         getProjectDocuments: (pid) => restCall('GET', `/api/projects/${pid}/documents`),
         saveProjectDocument: (data) => restCall('POST', '/api/documents', data),
         deleteProjectDocument: (id) => restCall('DELETE', `/api/documents/${id}`),
-
         getCrmContacts: () => restCall('GET', '/api/crm'),
         saveCrmContact: (data) => restCall('POST', '/api/crm', data),
         deleteCrmContact: (id) => restCall('DELETE', `/api/crm/${id}`),
-
         getOrgStaff: () => restCall('GET', '/api/staff'),
         saveOrgStaff: (data) => restCall('POST', '/api/staff', data),
         deleteOrgStaff: (id) => restCall('DELETE', `/api/staff/${id}`),
-
         getWorkLogs: () => restCall('GET', '/api/worklogs'),
         saveWorkLog: (data) => restCall('POST', '/api/worklogs', data),
         updateWorkLog: (id, data) => restCall('PUT', `/api/worklogs/${id}`, data),
         deleteWorkLog: (id) => restCall('DELETE', `/api/worklogs/${id}`),
-
         getMessages: (pid) => restCall('GET', pid ? `/api/messages?projectId=${pid}` : '/api/messages'),
         saveMessage: (data) => restCall('POST', '/api/messages', data),
         deleteMessage: (id) => restCall('DELETE', `/api/messages/${id}`),
-
         getPrivateMessages: (u1, u2) => restCall('GET', `/api/private-messages/${u1}/${u2}`),
         savePrivateMessage: (data) => restCall('POST', '/api/private-messages', data),
         deletePrivateMessage: (id) => restCall('DELETE', `/api/private-messages/${id}`),
-
-        checkNotifications: (id, lc) => restCall('GET', `/api/notifications/check`),
+        checkNotifications: (id, lc) => restCall('GET', `/api/notifications/check?userId=${id}&lastChecked=${lc}`),
         getKanbanTasks: () => restCall('GET', '/api/kanban'),
     },
-    // 🔥 Clean injection: If Tauri, use Rust invokes. If Web, use Fallbacks.
     os: { ...(isTauri ? tauriOsCalls : webOsFallbacks), ...osNetworkCalls }
 };

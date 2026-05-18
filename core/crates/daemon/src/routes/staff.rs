@@ -1,4 +1,4 @@
-#![allow(non_snake_case)] // 🔥 THIS SILENCES ALL THE WARNINGS FOR THE WHOLE FILE
+#![allow(non_snake_case)]
 
 use crate::routes::{ApiResponse, api_response};
 use axum::{
@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
-#[derive(Serialize, Deserialize, FromRow)]
+#[derive(Serialize, Deserialize, FromRow, Clone)]
 pub struct Staff {
     pub id: String,
     pub name: String,
@@ -22,7 +22,7 @@ pub struct Staff {
     pub username: Option<String>,
     pub password: Option<String>,
     pub role: Option<String>,
-    pub accessLevel: Option<i64>,
+    pub accessLevel: Option<i32>,
     pub globalPermissions: Option<String>,
 }
 
@@ -40,10 +40,8 @@ pub async fn save_staff(
     State(pool): State<SqlitePool>,
     Json(payload): Json<Staff>,
 ) -> Result<Json<ApiResponse<String>>, (StatusCode, Json<ApiResponse<()>>)> {
-    // 🔥 PASSWORD SECURITY INTERCEPTOR
     let mut final_password = payload.password.clone();
     if let Some(pw) = &payload.password {
-        // Only hash it if it isn't empty AND isn't already a bcrypt hash (bcrypt hashes always start with "$2")
         if !pw.is_empty() && !pw.starts_with("$2") {
             match bcrypt::hash(pw, bcrypt::DEFAULT_COST) {
                 Ok(hashed) => final_password = Some(hashed),
@@ -88,7 +86,7 @@ pub async fn save_staff(
         .bind(&payload.phone)
         .bind(payload.createdAt)
         .bind(&payload.username)
-        .bind(&final_password) // 🔥 BIND THE SECURED PASSWORD HERE
+        .bind(&final_password)
         .bind(&payload.role)
         .bind(payload.accessLevel)
         .bind(&payload.globalPermissions)
@@ -113,7 +111,9 @@ pub async fn delete_staff(
     api_response(result)
 }
 
-#[derive(Serialize, Deserialize, FromRow)]
+// 🔥 Updated WorkLog Struct for Man-Hour Tracking
+#[derive(Serialize, Deserialize, FromRow, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkLog {
     pub id: String,
     pub date: Option<String>,
@@ -124,6 +124,10 @@ pub struct WorkLog {
     pub remarks: Option<String>,
     pub status: Option<String>,
     pub createdAt: Option<i64>,
+    #[sqlx(rename = "duration_minutes")]
+    pub durationMinutes: Option<i32>,
+    #[sqlx(rename = "work_category")]
+    pub workCategory: Option<String>,
 }
 
 pub async fn get_worklogs(
@@ -141,8 +145,8 @@ pub async fn save_worklog(
     Json(payload): Json<WorkLog>,
 ) -> Result<Json<ApiResponse<String>>, (StatusCode, Json<ApiResponse<()>>)> {
     let query = "
-        INSERT INTO staff_work_logs (id, date, staffId, slNo, projectId, details, remarks, status, createdAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO staff_work_logs (id, date, staffId, slNo, projectId, details, remarks, status, createdAt, duration_minutes, work_category)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ";
 
     let result = sqlx::query(query)
@@ -155,6 +159,8 @@ pub async fn save_worklog(
         .bind(&payload.remarks)
         .bind(&payload.status)
         .bind(payload.createdAt)
+        .bind(payload.durationMinutes.unwrap_or(0))
+        .bind(&payload.workCategory)
         .execute(&pool)
         .await
         .map(|_| payload.id.clone())
@@ -170,7 +176,9 @@ pub async fn update_worklog(
 ) -> Result<Json<ApiResponse<String>>, (StatusCode, Json<ApiResponse<()>>)> {
     let query = "
         UPDATE staff_work_logs SET
-            date = ?, staffId = ?, slNo = ?, projectId = ?, details = ?, remarks = ?, status = ?
+            date = ?, staffId = ?, slNo = ?, projectId = ?, 
+            details = ?, remarks = ?, status = ?, 
+            duration_minutes = ?, work_category = ?
         WHERE id = ?
     ";
 
@@ -182,6 +190,8 @@ pub async fn update_worklog(
         .bind(&payload.details)
         .bind(&payload.remarks)
         .bind(&payload.status)
+        .bind(payload.durationMinutes)
+        .bind(&payload.workCategory)
         .bind(&id)
         .execute(&pool)
         .await
@@ -202,4 +212,32 @@ pub async fn delete_worklog(
         .map(|_| id.clone())
         .map_err(|e| e.to_string());
     api_response(result)
+}
+
+pub async fn get_project_man_hours(
+    State(pool): State<SqlitePool>,
+    Path(project_id): Path<String>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiResponse<()>>)> {
+    let query = "
+        SELECT work_category, SUM(duration_minutes) as total_mins
+        FROM staff_work_logs
+        WHERE projectId = ?
+        GROUP BY work_category
+    ";
+
+    let rows = sqlx::query_as::<_, (String, i32)>(query)
+        .bind(project_id)
+        .fetch_all(&pool)
+        .await;
+
+    match rows {
+        Ok(data) => {
+            let formatted = data
+                .into_iter()
+                .map(|(cat, mins)| serde_json::json!({ "category": cat, "minutes": mins }))
+                .collect::<Vec<_>>();
+            api_response(Ok(serde_json::json!(formatted)))
+        }
+        Err(e) => api_response(Err(e.to_string())),
+    }
 }

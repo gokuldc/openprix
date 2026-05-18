@@ -1,3 +1,9 @@
+// Prevents additional console window on Windows in release
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use crate::routes::auth::{Claims, JWT_SECRET};
+use axum::extract::ConnectInfo;
+use axum::http::Request;
 use axum::{
     Router,
     extract::DefaultBodyLimit,
@@ -5,6 +11,7 @@ use axum::{
     response::IntoResponse,
     routing::{delete, get, post, put},
 };
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use rust_embed::RustEmbed;
 use serde_json::Value;
 use shared::DaemonStatus;
@@ -15,6 +22,13 @@ use sqlx::{
 use std::str::FromStr;
 use std::{fs, net::SocketAddr, process};
 use tower_http::cors::CorsLayer;
+
+// Tray & Event Loop Imports
+use tao::event_loop::{ControlFlow, EventLoopBuilder};
+use tray_icon::{
+    Icon, TrayIconBuilder,
+    menu::{Menu, MenuEvent, MenuItem},
+};
 
 mod routes;
 
@@ -62,7 +76,7 @@ async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
         CREATE TABLE IF NOT EXISTS regions (id TEXT PRIMARY KEY, name TEXT);
         CREATE TABLE IF NOT EXISTS crm_contacts (id TEXT PRIMARY KEY, name TEXT, company TEXT, type TEXT, status TEXT, email TEXT, phone TEXT, createdAt INTEGER);
         CREATE TABLE IF NOT EXISTS org_staff (id TEXT PRIMARY KEY, name TEXT, designation TEXT, department TEXT, status TEXT, email TEXT, phone TEXT, createdAt INTEGER, username TEXT, password TEXT, role TEXT, accessLevel INTEGER, globalPermissions TEXT);
-        CREATE TABLE IF NOT EXISTS staff_work_logs (id TEXT PRIMARY KEY, date TEXT, staffId TEXT, slNo INTEGER, projectId TEXT, details TEXT, remarks TEXT, status TEXT, createdAt INTEGER);
+        CREATE TABLE IF NOT EXISTS staff_work_logs (id TEXT PRIMARY KEY, date TEXT, staffId TEXT, slNo INTEGER, projectId TEXT, details TEXT, remarks TEXT, status TEXT, createdAt INTEGER, duration_minutes INTEGER, work_category TEXT);
         CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, projectId TEXT, senderId TEXT, content TEXT, replyToId TEXT, createdAt INTEGER);
         CREATE TABLE IF NOT EXISTS private_messages (id TEXT PRIMARY KEY, senderId TEXT, receiverId TEXT, content TEXT, replyToId TEXT, createdAt INTEGER);
         CREATE TABLE IF NOT EXISTS project_documents (id TEXT PRIMARY KEY, projectId TEXT, name TEXT, category TEXT, filePath TEXT, fileType TEXT, addedAt INTEGER);
@@ -70,6 +84,13 @@ async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
 
     sqlx::query(schema).execute(pool).await?;
 
+    let _ =
+        sqlx::query("ALTER TABLE staff_work_logs ADD COLUMN duration_minutes INTEGER DEFAULT 0;")
+            .execute(pool)
+            .await;
+    let _ = sqlx::query("ALTER TABLE staff_work_logs ADD COLUMN work_category TEXT;")
+        .execute(pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE org_staff ADD COLUMN globalPermissions TEXT;")
         .execute(pool)
         .await;
@@ -87,8 +108,6 @@ async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64;
-
-        // 🔥 HASH THE DEFAULT PASSWORD
         let hashed_pw = bcrypt::hash("admin123", bcrypt::DEFAULT_COST).unwrap_or_default();
 
         sqlx::query(admin_insert)
@@ -101,20 +120,30 @@ async fn init_db(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
             .bind("")
             .bind(now)
             .bind("admin")
-            .bind(hashed_pw) // 🔥 BIND THE HASHED PASSWORD HERE
+            .bind(hashed_pw)
             .bind("Admin")
             .bind(5)
             .bind("[]")
             .execute(pool)
             .await?;
-        println!("Default admin account created with secured password.");
+        println!("Default admin account created.");
     }
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 🔥 FIX 1: Command Line Argument Router
+// 🔥 Helper to load icon for tray
+fn load_tray_icon() -> Icon {
+    let icon_bytes = include_bytes!("../../../../src-tauri/icons/32x32.png");
+    let image = image::load_from_memory(icon_bytes)
+        .expect("Failed to load tray icon")
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    let rgba = image.into_raw();
+    Icon::from_rgba(rgba, width, height).expect("Failed to create tray icon")
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Check for TUI launch argument
     let args: Vec<String> = std::env::args().collect();
     if args.contains(&"--t".to_string()) || args.contains(&"-t".to_string()) {
         let exe_path = std::env::current_exe().unwrap_or_default();
@@ -123,25 +152,115 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             "openprix-tui"
         });
-
-        match std::process::Command::new(&tui_path).spawn() {
-            Ok(_) => println!("Launching OpenPrix Console..."),
-            Err(e) => eprintln!(
-                "Error: Could not launch TUI at {}. {}",
-                tui_path.display(),
-                e
-            ),
-        }
+        let _ = std::process::Command::new(&tui_path).spawn();
         return Ok(());
     }
 
+    // 2. Setup Native Event Loop (Main Thread)
+    let event_loop = EventLoopBuilder::new().build();
+
+    // 3. Build Tray Menu
+    let tray_menu = Menu::new();
+    let quit_i = MenuItem::new("Quit Nexus Daemon", true, None);
+    let status_i = MenuItem::new("Status: Online", false, None);
+    let _ = tray_menu.append_items(&[&status_i, &quit_i]);
+
+    // 4. Initialize Tray Icon
+    let _tray_icon = TrayIconBuilder::new()
+        .with_menu(Box::new(tray_menu))
+        .with_tooltip("OpenPrix Nexus Daemon")
+        .with_icon(load_tray_icon())
+        .build()
+        .unwrap();
+
+    // 5. Spawn Axum Server in Background Tokio Runtime
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            if let Err(e) = run_server().await {
+                eprintln!("Server Error: {}", e);
+            }
+        });
+    });
+
+    // 6. Run Event Loop to handle Tray Clicks
+    let menu_channel = MenuEvent::receiver();
+
+    event_loop.run(move |_event, _window_target, control_flow| {
+        *control_flow = ControlFlow::Wait;
+        if let Ok(event) = menu_channel.try_recv() {
+            if event.id == quit_i.id() {
+                process::exit(0);
+            }
+        }
+    });
+}
+
+// 🔥 THE LOCALHOST GATEKEEPER
+async fn restrict_to_localhost(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, StatusCode> {
+    let ip = addr.ip();
+    // Only allow traffic originating from the local machine (127.0.0.1 or ::1)
+    if ip.is_loopback() {
+        Ok(next.run(request).await)
+    } else {
+        println!(
+            "🚨 SECURITY BLOCK: Blocked remote OS-level execution attempt from {}",
+            ip
+        );
+        Err(StatusCode::FORBIDDEN)
+    }
+}
+// 🔥 THE JWT AUTHENTICATION GATEKEEPER
+async fn require_jwt_auth(
+    mut request: Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, StatusCode> {
+    // 1. Extract the Authorization header
+    let auth_header = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
+
+    let auth_header = match auth_header {
+        Some(header) => header,
+        None => return Err(StatusCode::UNAUTHORIZED),
+    };
+
+    // 2. Strip the "Bearer " prefix
+    if !auth_header.starts_with("Bearer ") {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let token = &auth_header[7..];
+
+    // 3. Cryptographically verify the token
+    match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(JWT_SECRET),
+        &Validation::default(),
+    ) {
+        Ok(token_data) => {
+            // Optional: You can insert the user's ID into the request extensions
+            // so your downstream database routes know exactly who is making the request!
+            request.extensions_mut().insert(token_data.claims);
+            Ok(next.run(request).await)
+        }
+        Err(_) => {
+            println!("🚨 SECURITY BLOCK: Rejected request with invalid or expired token.");
+            Err(StatusCode::UNAUTHORIZED)
+        }
+    }
+}
+
+async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let root_dir = get_openprix_dir();
     let config_path = root_dir.join(".daemon_config.json");
     let status_path = root_dir.join(".daemon_status.json");
     let db_path = root_dir.join("database.sqlite");
 
-    // 🔥 FIX 2: Dynamic Port Assignment
-    // If the config doesn't exist, we default to 0. Port 0 tells the OS to assign a random free port!
     let configured_port: u16 = fs::read_to_string(&config_path)
         .ok()
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
@@ -149,30 +268,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|p| p as u16)
         .unwrap_or(0);
 
-    // Bind to the port FIRST to secure it
     let listener =
         tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], configured_port))).await?;
-    let actual_port = listener.local_addr()?.port(); // Get the port the OS actually gave us!
+    let actual_port = listener.local_addr()?.port();
 
-    // Save the actual port back to the config so the TUI and Frontend know where it is!
     let config = serde_json::json!({ "port": actual_port });
     let _ = fs::write(&config_path, config.to_string());
 
     let db_url = format!("sqlite://{}", db_path.to_str().unwrap_or(""));
-
-    println!("Booting OpenPrix Rust Daemon on Port {}...", actual_port);
     let connect_options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(connect_options)
         .await?;
 
-    sqlx::query("PRAGMA journal_mode = WAL;")
+    let _ = sqlx::query("PRAGMA journal_mode = WAL;")
         .execute(&pool)
-        .await?;
-    sqlx::query("PRAGMA synchronous = NORMAL;")
+        .await;
+    let _ = sqlx::query("PRAGMA synchronous = NORMAL;")
         .execute(&pool)
-        .await?;
+        .await;
 
     init_db(&pool).await?;
 
@@ -181,13 +296,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(tower_http::cors::Any);
 
-    let app = Router::new()
+    // 🔥 ISOLATED OS ROUTES (Protected by Middleware)
+    let os_routes = Router::new()
+        .route("/dirs", post(routes::os::list_directories))
+        .route("/scan", post(routes::os::scan_directory))
+        .route("/scaffold", post(routes::os::scaffold_project))
+        .route("/upload", post(routes::os::upload_file))
+        .route("/download", get(routes::os::download_file))
+        .route("/open", post(routes::os::open_file))
+        .route("/db/backup", post(routes::db::backup_database)) // Moved DB ops to OS group
+        .route("/db/restore", post(routes::db::restore_database)) // Moved DB ops to OS group
+        .route("/db/purge", post(routes::db::purge_database)) // Moved DB ops to OS group
+        .layer(axum::middleware::from_fn(restrict_to_localhost));
+
+    // --- 1. PUBLIC ROUTES (Accessible without login) ---
+    let public_routes = Router::new()
         .route("/api/health", get(|| async { "OpenPrix API is Online!" }))
-        .route("/api/auth/login", post(routes::auth::login))
+        .route("/api/auth/login", post(routes::auth::login));
+
+    // --- 2. PROTECTED ROUTES (Locked by JWT) ---
+    let protected_routes = Router::new()
         .route(
             "/api/settings/{key}",
             get(routes::settings::get_settings).post(routes::settings::save_settings),
         )
+        // Projects
         .route(
             "/api/projects",
             get(routes::projects::get_projects).post(routes::projects::add_project),
@@ -206,11 +339,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/projects/{id}/documents",
             get(routes::projects::get_project_docs),
         )
+        .route(
+            "/api/projects/{id}/upload",
+            post(routes::projects::upload_project_document),
+        )
         .route("/api/documents", post(routes::projects::save_project_doc))
         .route(
             "/api/documents/{id}",
             delete(routes::projects::delete_project_doc),
         )
+        // BOQs
         .route(
             "/api/projects/{id}/boqs",
             get(routes::boqs::get_project_boqs),
@@ -229,6 +367,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/master-boqs/{id}",
             delete(routes::boqs::delete_master_boq),
         )
+        // CommLink
         .route(
             "/api/messages",
             get(routes::messages::get_messages).post(routes::messages::save_message),
@@ -250,15 +389,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             delete(routes::messages::delete_private_message),
         )
         .route(
+            "/api/notifications/check",
+            get(routes::messages::check_notifications),
+        )
+        // Staff & Worklogs
+        .route(
             "/api/staff",
             get(routes::staff::get_staff).post(routes::staff::save_staff),
         )
         .route("/api/staff/{id}", delete(routes::staff::delete_staff))
-        .route(
-            "/api/crm",
-            get(routes::crm::get_crm).post(routes::crm::save_crm),
-        )
-        .route("/api/crm/{id}", delete(routes::crm::delete_crm))
         .route(
             "/api/worklogs",
             get(routes::staff::get_worklogs).post(routes::staff::save_worklog),
@@ -267,6 +406,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/worklogs/{id}",
             put(routes::staff::update_worklog).delete(routes::staff::delete_worklog),
         )
+        .route(
+            "/api/projects/{id}/man-hours",
+            get(routes::staff::get_project_man_hours),
+        )
+        // Resources & CRM
         .route(
             "/api/resources",
             get(routes::resources::get_resources).post(routes::resources::save_resource),
@@ -283,20 +427,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/regions/{id}",
             delete(routes::resources::delete_region),
         )
-        .route("/api/os/dirs", post(routes::os::list_directories))
-        .route("/api/os/scan", post(routes::os::scan_directory))
-        .route("/api/os/scaffold", post(routes::os::scaffold_project))
-        .route("/api/os/upload", post(routes::os::upload_file))
-        .route("/api/os/download", get(routes::os::download_file))
-        .route("/api/os/open", post(routes::os::open_file))
         .route(
-            "/api/notifications/check",
-            get(routes::messages::check_notifications),
+            "/api/crm",
+            get(routes::crm::get_crm).post(routes::crm::save_crm),
         )
+        .route("/api/crm/{id}", delete(routes::crm::delete_crm))
         .route("/api/kanban", get(routes::messages::get_kanban_tasks))
-        .route("/api/db/backup", post(routes::db::backup_database))
-        .route("/api/db/restore", post(routes::db::restore_database))
-        .route("/api/db/purge", post(routes::db::purge_database))
+        // 🔥 Defense in Depth: JWT also protects the nested OS routes
+        .nest("/api/os", os_routes)
+        // Apply JWT protection to EVERYTHING in this specific Router
+        .layer(axum::middleware::from_fn(require_jwt_auth));
+
+    // --- 3. FINAL ASSEMBLY ---
+    let app = Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
         .layer(DefaultBodyLimit::disable())
         .layer(cors)
         .with_state(pool)
@@ -310,7 +455,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     fs::write(status_path, serde_json::to_string(&status)?)?;
 
-    // 🔥 Pass the pre-bound listener directly to Axum!
-    axum::serve(listener, app).await?;
+    println!("Nexus Daemon Server Online on Port {}", actual_port);
+
+    // 🔥 ENABLE CONNECT INFO SO THE GATEKEEPER CAN READ IPs
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }

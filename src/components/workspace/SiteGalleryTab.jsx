@@ -163,27 +163,23 @@ export default function SiteGalleryTab({ projectId }) {
             const extension = file.name.split('.').pop().toLowerCase();
 
             try {
-                let targetFolder = undefined;
-                if (project?.isScaffolded && project?.scaffoldPath) {
-                    const basePath = project.scaffoldPath.replace(/[/\\]$/, '');
-                    targetFolder = `${basePath}/${uploadTarget}`;
-                }
-
-                // 🔥 Pass the raw 'file' object directly! No base64 conversions!
-                const res = await window.api.os.uploadFileWeb(file, targetFolder);
+                // 🔥 USE THE NEW SECURE SANDBOXED UPLOAD
+                const res = await window.api.os.uploadProjectDocument(projectId, file);
 
                 if (typeof res === 'string') {
                     await window.api.db.saveProjectDocument({
                         id: crypto.randomUUID(),
                         projectId,
                         name: file.name.replace(/\.[^/.]+$/, ""),
-                        category: uploadTarget,
+                        category: uploadTarget, // The UI still groups it by Album perfectly!
                         filePath: res,
                         fileType: extension,
                         addedAt: Date.now()
                     });
                 }
-            } catch (err) { console.error("Upload error:", err); }
+            } catch (err) {
+                console.error("Upload error:", err);
+            }
 
             setUploadProgress(prev => ({ ...prev, current: i + 1 }));
         }

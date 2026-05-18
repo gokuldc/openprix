@@ -151,49 +151,83 @@ export default function ProjectWorkspace({ projectId, onBack }) {
         queryClient.invalidateQueries({ queryKey: ['masterBoqs'] });
     };
 
-    // 🔥 WORKSPACE GATEKEEPER
+    // 🔥 HYBRID WORKSPACE GATEKEEPER
     useEffect(() => {
-        if (project && !hasClearance(4)) {
-            let isAssigned = false;
-            try {
-                const parsed = JSON.parse(project.assignedStaff || '[]');
-                if (Array.isArray(parsed)) isAssigned = parsed.includes(currentUser.id);
-                else isAssigned = parsed.hasOwnProperty(currentUser.id);
-            } catch (e) { isAssigned = false; }
+        if (!project || !currentUser) return;
 
+        // 1. Super Admins bypass all locks
+        if (hasClearance(5)) return;
+
+        let permissions = {};
+        try {
+            const parsed = JSON.parse(project.assignedStaff || '{}');
+            if (Array.isArray(parsed)) {
+                parsed.forEach(id => permissions[id] = ["details", "documents"]);
+            } else {
+                permissions = parsed;
+            }
+        } catch (e) { permissions = {}; }
+
+        const userRule = permissions[currentUser.id];
+
+        // 2. EXPLICIT DENY: Overrides Level 4 Clearance
+        if (userRule === 'blocked') {
+            alert("ACCESS DENIED: You have been explicitly blocked from this project.");
+            return onBack();
+        }
+
+        // 3. GLOBAL FALLBACK: If not explicitly assigned, check clearance
+        if (userRule === undefined) {
             const userPerms = typeof currentUser?.globalPermissions === 'string' ? JSON.parse(currentUser.globalPermissions) : (currentUser?.globalPermissions || []);
             const hasGlobalOverride = userPerms.includes('workspace');
 
-            if (!isAssigned && !hasGlobalOverride) {
+            if (!hasClearance(4) && !hasGlobalOverride) {
                 alert("ACCESS DENIED: You are not assigned to this project's team.");
-                onBack();
+                return onBack();
             }
         }
     }, [project, currentUser, hasClearance, onBack]);
 
+    // 🔥 HYBRID GRANULAR TABS RESOLVER
     const ALLOWED_CATEGORIES = useMemo(() => {
-        const filtered = {};
-        const rawAssigned = project?.assignedStaff || '[]';
+        if (!project || !currentUser) return {};
+        const isSuperAdmin = hasClearance(5);
+
         let permissions = {};
         try {
-            const parsed = JSON.parse(rawAssigned);
-            if (Array.isArray(parsed)) parsed.forEach(id => permissions[id] = ["details", "documents"]);
-            else permissions = parsed;
+            const parsed = JSON.parse(project.assignedStaff || '{}');
+            if (Array.isArray(parsed)) {
+                parsed.forEach(id => permissions[id] = ["details", "documents"]);
+            } else {
+                permissions = parsed;
+            }
         } catch (e) { permissions = {}; }
 
-        const userProjectPermissions = permissions[currentUser?.id] || [];
+        const userRule = permissions[currentUser.id];
+        if (userRule === 'blocked') return {}; // Secondary safety catch
+
         let userGlobalPerms = [];
         try { userGlobalPerms = typeof currentUser?.globalPermissions === 'string' ? JSON.parse(currentUser.globalPermissions) : (currentUser?.globalPermissions || []); } catch (e) { }
 
-        const isSuperAdmin = hasClearance(5);
+        const filtered = {};
 
         for (const [key, cat] of Object.entries(RAW_CATEGORIES)) {
             const allowedChildren = cat.children.filter(child => {
-                const hasExplicitProjectAccess = userProjectPermissions.includes(child.id);
+                // Super Admins see everything
+                if (isSuperAdmin) return true;
+
+                // 1. STRICT GRANULAR RULE OVERRIDE
+                if (Array.isArray(userRule)) {
+                    // If the PM explicitly assigned this user a strict list of tabs, enforce it.
+                    // This blocks a Level 4 from seeing "billing" if they were only granted "details".
+                    return userRule.includes(child.id);
+                }
+
+                // 2. DEFAULT HYBRID FALLBACK (User has no strict array rule, rely on global RBAC)
                 const hasGlobalLevelAccess = hasClearance(child.minClearance);
                 const hasGranularGlobalOverride = userGlobalPerms.includes(child.id);
 
-                return isSuperAdmin || hasExplicitProjectAccess || hasGlobalLevelAccess || hasGranularGlobalOverride;
+                return hasGlobalLevelAccess || hasGranularGlobalOverride;
             });
 
             if (allowedChildren.length > 0) {
@@ -226,7 +260,7 @@ export default function ProjectWorkspace({ projectId, onBack }) {
     const [formulaHelpOpen, setFormulaHelpOpen] = useState(false);
     const [editorItem, setEditorItem] = useState(null);
 
-    // 🔥 MUTATION ACTIONS (Still needed by Project Details Tab)
+    // 🔥 MUTATION ACTIONS
     const updateProject = async (field, value) => {
         const valToSave = (typeof value === 'object' && value !== null) ? JSON.stringify(value) : value;
         await updateProjectMutation.mutateAsync({ id: projectId, data: { [field]: valToSave } });
@@ -277,6 +311,24 @@ export default function ProjectWorkspace({ projectId, onBack }) {
 
     if (isProjectLoading) return <Box p={5} textAlign="center"><Typography sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary' }}>Loading workspace...</Typography></Box>;
     if (projectError || project === null) return <Box p={5} textAlign="center"><Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'error.main', mb: 2 }}>Error: Project Not Found</Typography><Button variant="outlined" onClick={onBack}>Return to Dashboard</Button></Box>;
+
+    // 🔥 ZERO-TAB GATEKEEPER: If no modules are allowed, show nothing but a lock screen.
+    if (Object.keys(ALLOWED_CATEGORIES).length === 0) {
+        return (
+            <Box display="flex" justifyContent="center" alignItems="center" height="100%" flexDirection="column" gap={2} sx={{ p: 5, textAlign: 'center' }}>
+                <LockIcon sx={{ fontSize: 60, color: 'error.main', opacity: 0.8 }} />
+                <Typography variant="h5" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', fontWeight: 'bold' }}>
+                    WORKSPACE_RESTRICTED
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 400 }}>
+                    All modules within this project have been explicitly revoked for your account. Please contact the Project Lead if you need access.
+                </Typography>
+                <Button variant="outlined" onClick={onBack} sx={{ mt: 3, fontFamily: "'JetBrains Mono', monospace", borderRadius: 50 }}>
+                    RETURN_TO_HOME
+                </Button>
+            </Box>
+        );
+    }
 
     return (
         <Box sx={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>

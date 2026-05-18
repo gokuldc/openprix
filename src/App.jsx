@@ -14,7 +14,7 @@ import ChatIcon from '@mui/icons-material/Chat';
 import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import MenuIcon from '@mui/icons-material/Menu';
 import HomeIcon from '@mui/icons-material/Home';
-import FolderSpecialIcon from '@mui/icons-material/FolderSpecial'; // Used for Archive
+import FolderSpecialIcon from '@mui/icons-material/FolderSpecial';
 import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder';
 import AutoStoriesIcon from '@mui/icons-material/AutoStories';
 import StorageIcon from '@mui/icons-material/Storage';
@@ -23,6 +23,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import LogoutIcon from '@mui/icons-material/Logout';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
+import LockIcon from '@mui/icons-material/Lock';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -44,8 +45,8 @@ import CompanySettings from './components/CompanySettings';
 const queryClient = new QueryClient({
     defaultOptions: {
         queries: {
-            refetchOnWindowFocus: false, // Prevents aggressive refetching when switching windows
-            staleTime: 1000 * 60 * 5, // Data stays "fresh" for 5 minutes
+            refetchOnWindowFocus: false,
+            staleTime: 1000 * 60 * 5,
         },
     },
 });
@@ -53,33 +54,59 @@ const queryClient = new QueryClient({
 // GATEKEEPER
 function Gatekeeper({ children }) {
     const { currentUser } = useAuth();
+    // If no user is logged in, show the Login screen exclusively
     if (!currentUser || !currentUser.role) return <Login />;
     return children;
 }
 
-// NOTIFICATION BADGE
+// NOTIFICATION BADGE & OS ALERTS
 function GlobalChatButton({ chatOpen, onOpen }) {
     const { currentUser } = useAuth();
     const [unreadCount, setUnreadCount] = useState(0);
+    const [prevCount, setPrevCount] = useState(0);
 
     useEffect(() => {
         if (!currentUser) return;
+
         const checkUnreadMessages = async () => {
             if (chatOpen) {
                 localStorage.setItem(`last_chat_check_${currentUser.id}`, Date.now().toString());
                 setUnreadCount(0);
+                setPrevCount(0);
                 return;
             }
             try {
                 const lastChecked = parseInt(localStorage.getItem(`last_chat_check_${currentUser.id}`) || '0');
-                const count = await window.api.db.checkNotifications(currentUser.id, lastChecked);
+                const res = await window.api.db.checkNotifications(currentUser.id, lastChecked);
+
+                // Handle bridge returning unauthorized object
+                if (res?.unauthorized) return;
+
+                let count = 0;
+                if (typeof res === 'number') count = res;
+                else if (typeof res === 'string' && !isNaN(res)) count = parseInt(res);
+                else if (Array.isArray(res)) count = res.length;
+                else if (res && typeof res === 'object' && res.count !== undefined) count = res.count;
+
+                if (count > prevCount && count > 0) {
+                    const newMsgs = count - prevCount;
+                    window.api.os.sendNotification(
+                        "OPENPRIX COMMLINK",
+                        `You have ${newMsgs} new unread message${newMsgs > 1 ? 's' : ''}.`
+                    );
+                }
+
+                setPrevCount(count);
                 setUnreadCount(count);
-            } catch (err) { }
+            } catch (err) {
+                console.error("[Notification Engine] Failed:", err);
+            }
         };
+
         checkUnreadMessages();
-        const interval = setInterval(checkUnreadMessages, 15000); // Throttled to 15 seconds
+        const interval = setInterval(checkUnreadMessages, 15000);
         return () => clearInterval(interval);
-    }, [currentUser, chatOpen]);
+    }, [currentUser, chatOpen, prevCount]);
 
     return (
         <Tooltip title="Global CommLink">
@@ -113,7 +140,6 @@ export default function App() {
         return newMode;
     });
 
-    // --- HOOK 1: Connection Boot Sequence ---
     useEffect(() => {
         if (!isTauri) {
             setIsConnected(true);
@@ -129,7 +155,7 @@ export default function App() {
                         setIsConnected(true);
                     }
                 } catch (e) {
-                    console.warn("[OpenPrix] Daemon offline or unreachable. Prompting for new connection.");
+                    console.warn("[OpenPrix] Daemon offline or unreachable.");
                 }
             }
         };
@@ -137,35 +163,39 @@ export default function App() {
         checkExistingConnection();
     }, [isTauri]);
 
-    // --- HOOK 2: Fetch Staff ---
+    // 🔥 THE FIX: Gated data fetch
     useEffect(() => {
-        window.api?.db?.getOrgStaff().then(data => setOrgStaff(data || []));
+        const token = localStorage.getItem('openprix_token');
+        // Only attempt fetch if we have a token, preventing 401 loops
+        if (token && window.api?.db?.getOrgStaff) {
+            window.api.db.getOrgStaff().then(data => {
+                // Ignore if the bridge returned an unauthorized flag
+                if (data && !data.unauthorized) {
+                    setOrgStaff(data || []);
+                }
+            });
+        }
     }, [currentView]);
 
-    // --- HOOK 3: Sync Settings ---
     useEffect(() => {
         if (window.api && window.api.onOpenSyncSettings) {
             window.api.onOpenSyncSettings(() => {
                 window.api.db.getSettings('sync_server_url').then(data => {
-                    if (data) setSyncUrl(data.value || "");
+                    if (data && !data.unauthorized) setSyncUrl(data.value || "");
                 });
                 setSyncModalOpen(true);
             });
         }
     }, []);
 
-    // 🔥 EARLY RETURN MUST GO HERE (AFTER ALL HOOKS!)
     if (!isConnected && isTauri) {
         return (
             <ConnectPortal onConnected={() => {
-                // When connected, we force a hard reload so webBridge.js 
-                // catches the newly saved IP address on boot!
                 window.location.reload();
             }} />
         );
     }
 
-    // --- REST OF APP LOGIC ---
     const handleSaveSyncUrl = async () => {
         await window.api.db.saveSettings('sync_server_url', { value: syncUrl });
         setSyncModalOpen(false);
@@ -203,61 +233,15 @@ export default function App() {
             },
             MuiButton: {
                 styleOverrides: {
-                    root: {
-                        borderRadius: 8,
-                        fontFamily: "'JetBrains Mono', monospace",
-                        textTransform: 'none',
-                        fontWeight: 600,
-                        padding: '8px 16px',
-                    },
-                    contained: {
-                        boxShadow: 'none',
-                        '&:hover': {
-                            boxShadow: '0px 4px 12px rgba(59, 130, 246, 0.4)',
-                        }
-                    }
+                    root: { borderRadius: 8, fontFamily: "'JetBrains Mono', monospace", textTransform: 'none', fontWeight: 600, padding: '8px 16px' },
+                    contained: { boxShadow: 'none', '&:hover': { boxShadow: '0px 4px 12px rgba(59, 130, 246, 0.4)' } }
                 }
             },
-            MuiTextField: {
-                defaultProps: {
-                    variant: 'outlined',
-                    size: 'small',
-                }
-            },
-            MuiOutlinedInput: {
-                styleOverrides: {
-                    root: {
-                        borderRadius: 8,
-                        fontFamily: "'Inter', sans-serif",
-                    }
-                }
-            },
-            MuiPaper: {
-                styleOverrides: {
-                    root: {
-                        backgroundImage: 'none',
-                        borderRadius: 12,
-                    }
-                }
-            },
-            MuiDialog: {
-                styleOverrides: {
-                    paper: {
-                        backgroundColor: mode === 'dark' ? '#0d1f3c' : '#ffffff',
-                        border: `1px solid ${mode === 'dark' ? '#1e3a5f' : '#cbd5e1'}`,
-                        backgroundImage: 'none',
-                    }
-                }
-            },
-            MuiDialogTitle: {
-                styleOverrides: {
-                    root: {
-                        fontFamily: "'JetBrains Mono', monospace",
-                        fontWeight: 'bold',
-                        letterSpacing: '1px',
-                    }
-                }
-            }
+            MuiTextField: { defaultProps: { variant: 'outlined', size: 'small' } },
+            MuiOutlinedInput: { styleOverrides: { root: { borderRadius: 8, fontFamily: "'Inter', sans-serif" } } },
+            MuiPaper: { styleOverrides: { root: { backgroundImage: 'none', borderRadius: 12 } } },
+            MuiDialog: { styleOverrides: { paper: { backgroundColor: mode === 'dark' ? '#0d1f3c' : '#ffffff', border: `1px solid ${mode === 'dark' ? '#1e3a5f' : '#cbd5e1'}`, backgroundImage: 'none' } } },
+            MuiDialogTitle: { styleOverrides: { root: { fontFamily: "'JetBrains Mono', monospace", fontWeight: 'bold', letterSpacing: '1px' } } }
         }
     });
 
@@ -276,15 +260,13 @@ export default function App() {
                         <CssBaseline />
                         <Gatekeeper>
                             <AppContent
-                                isTauri={isTauri}
-                                mode={mode} theme={theme} toggleTheme={toggleTheme}
+                                isTauri={isTauri} mode={mode} theme={theme} toggleTheme={toggleTheme}
                                 currentView={currentView} setCurrentView={setCurrentView}
                                 activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId}
                                 aboutOpen={aboutOpen} setAboutOpen={setAboutOpen}
                                 sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen}
                                 globalChatOpen={globalChatOpen} setGlobalChatOpen={setGlobalChatOpen}
-                                orgStaff={orgStaff}
-                                syncModalOpen={syncModalOpen} setSyncModalOpen={setSyncModalOpen}
+                                orgStaff={orgStaff} syncModalOpen={syncModalOpen} setSyncModalOpen={setSyncModalOpen}
                                 syncUrl={syncUrl} setSyncUrl={setSyncUrl} handleSaveSyncUrl={handleSaveSyncUrl}
                                 isProfileOpen={isProfileOpen} setIsProfileOpen={setIsProfileOpen}
                                 profileData={profileData} setProfileData={setProfileData}
@@ -302,15 +284,9 @@ function AppContent({
     isTauri, mode, theme, toggleTheme, currentView, setCurrentView, activeProjectId, setActiveProjectId,
     aboutOpen, setAboutOpen, sidebarOpen, setSidebarOpen, globalChatOpen, setGlobalChatOpen,
     orgStaff, syncModalOpen, setSyncModalOpen, syncUrl, setSyncUrl, handleSaveSyncUrl,
-    isProfileOpen, setIsProfileOpen, profileData, setProfileData, generateSecureId
+    isProfileOpen, setIsProfileOpen, profileData, setProfileData
 }) {
     const { currentUser, logout, hasClearance } = useAuth();
-    let userGlobalPerms = [];
-    try {
-        userGlobalPerms = typeof currentUser?.globalPermissions === 'string'
-            ? JSON.parse(currentUser.globalPermissions)
-            : (currentUser?.globalPermissions || []);
-    } catch (e) { }
 
     const handleOpenGlobalChat = () => {
         setGlobalChatOpen(true);
@@ -357,9 +333,46 @@ function AppContent({
     ];
 
     const userItems = [
-        { label: 'My Profile', icon: <AccountCircleIcon />, action: handleOpenProfile, clearance: 1, color: 'text.primary' },
-        { label: 'Secure Logout', icon: <LogoutIcon />, action: logout, clearance: 1, color: 'error.main' }
+        { label: 'My Profile', icon: <AccountCircleIcon />, action: handleOpenProfile, color: 'text.primary' },
+        { label: 'Secure Logout', icon: <LogoutIcon />, action: logout, color: 'error.main' }
     ];
+
+    let globalPerms = {};
+    let isStrictArray = false;
+
+    try {
+        const raw = currentUser?.globalPermissions;
+        if (raw && raw !== "") {
+            const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+
+            if (Array.isArray(parsed)) {
+                isStrictArray = true;
+                parsed.forEach(id => globalPerms[id] = 'allowed');
+            } else {
+                globalPerms = parsed;
+            }
+        }
+    } catch (e) {
+        globalPerms = {};
+    }
+
+    const canAccessView = (viewId) => {
+        //  Level 5 (Admin) should ALWAYS bypass every permission check
+        if (currentUser && Number(currentUser.access_level) >= 5) return true;
+
+        const rule = globalPerms[viewId];
+        if (rule === 'blocked' || rule === false) return false;
+        if (rule === 'allowed' || rule === true) return true;
+
+        // ... rest of logic
+    };
+
+    useEffect(() => {
+        if (currentView !== 'workspace' && !canAccessView(currentView)) {
+            const fallbackTab = navItems.find(item => canAccessView(item.id));
+            if (fallbackTab) setCurrentView(fallbackTab.id);
+        }
+    }, [currentView, currentUser]);
 
     const SIDEBAR_CLOSED_WIDTH = 68;
     const SIDEBAR_OPEN_WIDTH = 260;
@@ -369,7 +382,7 @@ function AppContent({
             <AppBar position="relative" elevation={0} sx={{ zIndex: 1300, flexShrink: 0 }}>
                 <Toolbar>
                     <IconButton edge="start" color="inherit" onClick={() => { setSidebarOpen(!sidebarOpen); setGlobalChatOpen(false); }} sx={{ mr: 2 }}><MenuIcon /></IconButton>
-                    <Typography variant="h6" onClick={() => setCurrentView('home')} sx={{ flexGrow: 1, fontWeight: 'bold', fontFamily: "'JetBrains Mono', monospace", color: 'primary.main', cursor: 'pointer', letterSpacing: '1px' }}>{'// '}OPENPRIX</Typography>
+                    <Typography variant="h6" onClick={() => { if (canAccessView('home')) setCurrentView('home'); }} sx={{ flexGrow: 1, fontWeight: 'bold', fontFamily: "'JetBrains Mono', monospace", color: 'primary.main', cursor: 'pointer', letterSpacing: '1px' }}>{'// '}OPENPRIX</Typography>
                     <GlobalChatButton chatOpen={globalChatOpen} onOpen={handleOpenGlobalChat} />
                     <Tooltip title="System Info"><IconButton onClick={() => setAboutOpen(true)} sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}><InfoOutlinedIcon /></IconButton></Tooltip>
                     <IconButton onClick={toggleTheme} sx={{ ml: 1, color: 'text.secondary' }}>{theme.palette.mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}</IconButton>
@@ -386,11 +399,7 @@ function AppContent({
                     <Box sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', pt: 2 }}>
                         <List sx={{ px: 1 }}>
                             {navItems.map((item, idx) => {
-                                // 🔥 THE GATEKEEPER: Check Level OR Global Override
-                                const hasLevelAccess = hasClearance(item.clearance);
-                                const hasGranularOverride = userGlobalPerms.includes(item.id);
-
-                                if (!hasLevelAccess && !hasGranularOverride) return null;
+                                if (!canAccessView(item.id)) return null;
                                 if (item.tauriOnly && !isTauri) return null;
 
                                 return (
@@ -427,14 +436,14 @@ function AppContent({
 
                 <Box sx={{ flexGrow: 1, minWidth: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column' }}>
                     <ErrorBoundary>
-                        {currentView === 'home' && <Home onOpenProject={(id) => { setActiveProjectId(id); setCurrentView('workspace'); }} />}
-                        {currentView === 'archive' && <ProjectArchive onOpenProject={(id) => { setActiveProjectId(id); setCurrentView('workspace'); }} />}
-                        {currentView === 'database' && <DatabaseEditor />}
+                        {currentView === 'home' && (canAccessView('home') ? <Home onOpenProject={(id) => { setActiveProjectId(id); setCurrentView('workspace'); }} /> : <AccessDenied />)}
+                        {currentView === 'archive' && (canAccessView('archive') ? <ProjectArchive onOpenProject={(id) => { setActiveProjectId(id); setCurrentView('workspace'); }} /> : <AccessDenied />)}
+                        {currentView === 'database' && (canAccessView('database') ? <DatabaseEditor /> : <AccessDenied />)}
+                        {currentView === 'directory' && (canAccessView('directory') ? <Directory /> : <AccessDenied />)}
+                        {currentView === 'logs' && (canAccessView('logs') ? <DailyLogs /> : <AccessDenied />)}
+                        {currentView === 'servermanager' && (canAccessView('servermanager') ? <ServerManager /> : <AccessDenied />)}
+                        {currentView === 'settings' && (canAccessView('settings') ? <CompanySettings /> : <AccessDenied />)}
                         {currentView === 'workspace' && <ProjectWorkspace projectId={activeProjectId} onBack={() => setCurrentView('home')} />}
-                        {currentView === 'directory' && <Directory />}
-                        {currentView === 'logs' && <DailyLogs />}
-                        {currentView === 'servermanager' && <ServerManager />}
-                        {currentView === 'settings' && <CompanySettings />}
                     </ErrorBoundary>
                 </Box>
             </Box>
@@ -448,7 +457,7 @@ function AppContent({
                 <DialogTitle sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}><CloudSyncIcon /> CLOUD_SYNC_TARGET</DialogTitle>
                 <DialogContent dividers sx={{ borderColor: 'rgba(255,255,255,0.1)' }}>
                     <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', mb: 3 }}>Configure the remote endpoint for background synchronization.</Typography>
-                    <TextField fullWidth label="SERVER ENDPOINT URL" value={syncUrl} onChange={e => setSyncUrl(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '14px' } }} />
+                    <TextField fullWidth label="SERVER ENDPOINT URL" value={syncUrl} onChange={e => setSyncUrl(e.target.value)} />
                 </DialogContent>
                 <DialogActions sx={{ p: 3, bgcolor: 'rgba(0,0,0,0.2)' }}>
                     <Button onClick={() => setSyncModalOpen(false)} sx={{ color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace" }}>CANCEL</Button>
@@ -460,12 +469,12 @@ function AppContent({
                 <DialogTitle sx={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 'bold' }}>EDIT_IDENTITY_PROFILE</DialogTitle>
                 <DialogContent dividers sx={{ bgcolor: 'rgba(13, 31, 60, 0.5)', pt: 3 }}>
                     <Grid container spacing={3}>
-                        <Grid item xs={12} md={6}><TextField fullWidth label="FULL NAME" value={profileData.name || ""} onChange={e => setProfileData({ ...profileData, name: e.target.value })} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} /></Grid>
-                        <Grid item xs={12} md={6}><TextField fullWidth label="EMAIL ADDRESS" value={profileData.email || ""} onChange={e => setProfileData({ ...profileData, email: e.target.value })} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} /></Grid>
-                        <Grid item xs={12} md={6}><TextField fullWidth label="PHONE NUMBER" value={profileData.phone || ""} onChange={e => setProfileData({ ...profileData, phone: e.target.value })} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} /></Grid>
-                        <Grid item xs={12} md={6}><TextField fullWidth label="LOGIN USERNAME" value={profileData.username || ""} onChange={e => setProfileData({ ...profileData, username: e.target.value })} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} /></Grid>
-                        <Grid item xs={12} md={6}><TextField fullWidth label="PASSWORD / PIN" type="text" value={profileData.password || ""} onChange={e => setProfileData({ ...profileData, password: e.target.value })} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} /></Grid>
-                        <Grid item xs={12} md={6}><TextField fullWidth label="SYSTEM CLEARANCE LEVEL" value={`LEVEL ${currentUser?.accessLevel || 1} [${currentUser?.role || 'Staff'}]`} disabled InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} helperText="Clearance locked. Contact L5 Root." /></Grid>
+                        <Grid item xs={12} md={6}><TextField fullWidth label="FULL NAME" value={profileData.name || ""} onChange={e => setProfileData({ ...profileData, name: e.target.value })} /></Grid>
+                        <Grid item xs={12} md={6}><TextField fullWidth label="EMAIL ADDRESS" value={profileData.email || ""} onChange={e => setProfileData({ ...profileData, email: e.target.value })} /></Grid>
+                        <Grid item xs={12} md={6}><TextField fullWidth label="PHONE NUMBER" value={profileData.phone || ""} onChange={e => setProfileData({ ...profileData, phone: e.target.value })} /></Grid>
+                        <Grid item xs={12} md={6}><TextField fullWidth label="LOGIN USERNAME" value={profileData.username || ""} onChange={e => setProfileData({ ...profileData, username: e.target.value })} /></Grid>
+                        <Grid item xs={12} md={6}><TextField fullWidth label="PASSWORD / PIN" type="text" value={profileData.password || ""} onChange={e => setProfileData({ ...profileData, password: e.target.value })} /></Grid>
+                        <Grid item xs={12} md={6}><TextField fullWidth label="SYSTEM CLEARANCE LEVEL" value={`LEVEL ${currentUser?.accessLevel || 1} [${currentUser?.role || 'Staff'}]`} disabled helperText="Clearance locked. Contact L5 Root." /></Grid>
                     </Grid>
                 </DialogContent>
                 <DialogActions sx={{ p: 3, bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
@@ -479,6 +488,20 @@ function AppContent({
                     <ChatModule projectId={null} orgStaff={orgStaff} onClose={() => setGlobalChatOpen(false)} />
                 </Box>
             </Drawer>
+        </Box>
+    );
+}
+
+function AccessDenied() {
+    return (
+        <Box display="flex" justifyContent="center" alignItems="center" height="100%" flexDirection="column" gap={2} sx={{ p: 5, textAlign: 'center' }}>
+            <LockIcon sx={{ fontSize: 60, color: 'error.main', opacity: 0.8 }} />
+            <Typography variant="h5" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', fontWeight: 'bold' }}>
+                ACCESS_RESTRICTED
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 400 }}>
+                You do not have the required clearance to view this module. If you believe this is an error, contact your System Administrator.
+            </Typography>
         </Box>
     );
 }

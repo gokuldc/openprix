@@ -243,8 +243,8 @@ export default function Home() {
                     <Grid item xs={12} lg={4}>
                         <Paper sx={{ p: 3, borderRadius: 3, bgcolor: alpha(theme.palette.background.paper, 0.3), border: '1px solid', borderColor: 'divider', height: 400 }}>
                             <Typography variant="subtitle2" sx={{ fontFamily: "'JetBrains Mono', monospace", mb: 3, opacity: 0.7 }}>PROJECT_LIFECYCLE</Typography>
-                            <Box sx={{ height: 300, width: '100%', minWidth: 0 }}>
-                                <ResponsiveContainer>
+                            <Box sx={{ height: 300, width: '100%', minWidth: 0, minHeight: 300 }}>
+                                <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie data={projectStatusData} innerRadius={70} outerRadius={90} paddingAngle={8} dataKey="value">
                                             {projectStatusData.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}

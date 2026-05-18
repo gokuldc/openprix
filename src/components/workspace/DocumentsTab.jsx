@@ -126,14 +126,9 @@ export default function DocumentsTab({ projectId }) {
         const extension = file.name.split('.').pop().toLowerCase();
         const finalCategory = uploadContext.category || category || "Uncategorized";
 
-        let targetFolder = undefined;
-        if (project?.isScaffolded && project?.scaffoldPath) {
-            const basePath = project.scaffoldPath.replace(/[/\\]$/, '');
-            targetFolder = `${basePath}/${finalCategory}`;
-        }
-
-        // 🔥 Pass the raw 'file' object directly! 
-        const res = await window.api.os.uploadFileWeb(file, targetFolder);
+        // 🔥 USE THE NEW SECURE SANDBOXED UPLOAD
+        // We no longer need to calculate target folders; Rust handles isolation safely.
+        const res = await window.api.os.uploadProjectDocument(projectId, file);
 
         if (typeof res === 'string') {
             const finalName = uploadContext.name || name || file.name.replace(/\.[^/.]+$/, "");
@@ -143,7 +138,7 @@ export default function DocumentsTab({ projectId }) {
                 projectId,
                 name: finalName,
                 category: finalCategory,
-                filePath: res,
+                filePath: res, // This is the safe path returned by Rust
                 fileType: extension,
                 addedAt: Date.now()
             });
@@ -157,9 +152,10 @@ export default function DocumentsTab({ projectId }) {
 
     const handleOpenFile = async (path) => {
         const result = await window.api.os.openFile(path);
-        if (result && !result.success) alert("Could not open file. It may have been moved or deleted from the host system.");
+        if (typeof result === 'object' && result.success === false) {
+            alert("Could not open file. It may have been moved or deleted from the host system.");
+        }
     };
-
     const handleDownloadFile = (path, fileName) => {
         const downloadUrl = `${window.api.os.getServerUrl ? window.api.os.getServerUrl() : ''}/api/os/download?path=${encodeURIComponent(path)}`;
         const a = document.createElement('a');

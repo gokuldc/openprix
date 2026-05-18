@@ -162,6 +162,24 @@ pub async fn download_file(Query(query): Query<DownloadQuery>) -> impl IntoRespo
 pub async fn open_file(Json(payload): Json<OpenPayload>) -> Json<ApiResponse<String>> {
     let path = Path::new(&payload.path);
 
+    // 🔥 THE DETONATOR SHIELD
+    let dangerous_exts = ["exe", "bat", "cmd", "sh", "vbs", "ps1", "msi", "js", "html"];
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if dangerous_exts.contains(&ext.as_str()) {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(
+                "SECURITY SHIELD: Executable and script files cannot be opened natively.".into(),
+            ),
+        });
+    }
+
     if path.exists() {
         match open::that(path) {
             Ok(_) => Json(ApiResponse {
