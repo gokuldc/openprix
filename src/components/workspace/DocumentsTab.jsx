@@ -157,7 +157,12 @@ export default function DocumentsTab({ projectId }) {
         }
     };
     const handleDownloadFile = (path, fileName) => {
-        const downloadUrl = `${window.api.os.getServerUrl ? window.api.os.getServerUrl() : ''}/api/os/download?path=${encodeURIComponent(path)}`;
+        const token = localStorage.getItem('openprix_token'); // Get the token
+        const baseUrl = window.api.os.getServerUrl ? window.api.os.getServerUrl() : '';
+
+        // Append token to the URL
+        const downloadUrl = `${baseUrl}/api/os/download?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token || '')}`;
+
         const a = document.createElement('a');
         a.href = downloadUrl;
         a.download = fileName;

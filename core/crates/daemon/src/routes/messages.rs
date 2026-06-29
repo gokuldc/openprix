@@ -1,13 +1,12 @@
 use crate::{routes::ApiResponse, routes::api_response};
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::extract::{Path, Query, State};
+use axum::{Json, extract::Multipart, http::StatusCode};
 use serde::Deserialize;
 use shared::{Message, PrivateMessage};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
+use std::path::Path as StdPath;
+use tokio::fs;
 
 #[derive(Deserialize)]
 pub struct SendMessage {
@@ -192,4 +191,99 @@ pub async fn get_kanban_tasks() -> Json<ApiResponse<Vec<serde_json::Value>>> {
         data: Some(vec![]),
         error: None,
     })
+}
+// SECURE CHAT ATTACHMENT UPLOAD
+pub async fn upload_chat_file(
+    mut multipart: Multipart,
+) -> Result<
+    Json<crate::routes::ApiResponse<String>>,
+    (StatusCode, Json<crate::routes::ApiResponse<()>>),
+> {
+    let root_dir = crate::get_openprix_dir();
+    let safe_dir = root_dir.join("chat_uploads");
+
+    println!("DEBUG: Chat upload triggered. Target dir: {:?}", safe_dir);
+
+    // 1. Ensure directory exists with better error reporting
+    if let Err(e) = fs::create_dir_all(&safe_dir).await {
+        eprintln!("ERROR: Failed to create chat_uploads directory: {}", e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(crate::routes::ApiResponse {
+                success: false,
+                data: None,
+                error: Some(format!("Filesystem error: {}", e)),
+            }),
+        ));
+    }
+
+    let mut saved_paths = Vec::new();
+
+    // 2. Parse Multipart fields
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let original_name = field.file_name().unwrap_or("untitled").to_string();
+
+        // Sanitize path
+        let safe_name = StdPath::new(&original_name)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        if safe_name.is_empty() {
+            continue;
+        }
+
+        let ext = StdPath::new(&safe_name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // Security Whitelist
+        let allowed_extensions = [
+            "pdf", "doc", "docx", "xls", "xlsx", "csv", "txt", "ppt", "pptx", "jpg", "jpeg", "png",
+            "webp", "gif", "mp4", "mov", "avi", "dwg", "dxf", "rvt", "skp", "etb", "md",
+        ];
+
+        if !allowed_extensions.contains(&ext.as_str()) {
+            println!("DEBUG: Rejected file extension: .{}", ext);
+            continue;
+        }
+
+        // Generate unique filename
+        let unique_name = format!(
+            "{}_{}",
+            uuid::Uuid::new_v4()
+                .to_string()
+                .chars()
+                .take(8)
+                .collect::<String>(),
+            safe_name
+        );
+        let dest_path = safe_dir.join(&unique_name);
+
+        println!("DEBUG: Writing file to: {:?}", dest_path);
+
+        // 3. Write binary data
+        match field.bytes().await {
+            Ok(data) => {
+                if let Err(e) = fs::write(&dest_path, &data).await {
+                    eprintln!("ERROR: Failed to write file to disk: {}", e);
+                    continue;
+                }
+                saved_paths.push(dest_path.to_string_lossy().replace("\\", "/"));
+            }
+            Err(e) => {
+                eprintln!("ERROR: Failed to read multipart bytes: {}", e);
+            }
+        }
+    }
+
+    if saved_paths.is_empty() {
+        println!("DEBUG: Upload finished but no files were saved.");
+        return crate::routes::api_response(Err("No valid files uploaded.".to_string()));
+    }
+
+    crate::routes::api_response(Ok(saved_paths.join(",")))
 }

@@ -126,16 +126,13 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
         inputRef.current?.focus();
     };
 
-    // --- LOGIC: Attachments & Linking ---
+    /// --- LOGIC: Attachments & Linking ---
     const handleFileAttach = async (e) => {
         const file = e.target?.files?.[0];
 
         if (file) {
-            // 🔥 Use the new Streaming API directly! No FileReader RAM spike.
-            // Route it to a safe folder based on whether we are in a project or global chat
-            const targetFolder = projectId ? `Project_Chat_Uploads` : `Global_Chat_Uploads`;
-
-            const res = await window.api.os.uploadFileWeb(file, targetFolder);
+            // 🔥 Use the new sandboxed Chat Upload API
+            const res = await window.api.db.uploadChatAttachment(file);
 
             if (res && typeof res === 'string') {
                 sendSystemMessage(`📎 Attached: ${file.name}`, { type: 'file', path: res, name: file.name });

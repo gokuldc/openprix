@@ -27,9 +27,11 @@ const SmartMedia = ({ filePath, alt, style, isThumbnail = false }) => {
     useEffect(() => {
         let isMounted = true;
         const resolveMedia = async () => {
+            const token = localStorage.getItem('openprix_token');
             const isDesktop = navigator.userAgent.toLowerCase().includes('electron');
+            const targetUrl = window.api?.os?.getServerUrl ? window.api.os.getServerUrl() : 'http://127.0.0.1:3000';
 
-            // For images on Desktop, try base64 first for speed
+            // 1. Desktop optimization: try base64 first
             if (!isVideo && isDesktop && window.api?.os?.getBase64) {
                 try {
                     const b64 = await window.api.os.getBase64(filePath);
@@ -40,10 +42,13 @@ const SmartMedia = ({ filePath, alt, style, isThumbnail = false }) => {
                 } catch (e) { }
             }
 
-            // Fallback & Video Streaming: Use the HTTP Download/Stream Endpoint
+            // 2. HTTP Streaming: MUST include the token in the URL for Auth
             if (isMounted) {
-                const targetUrl = window.api?.os?.getServerUrl ? window.api.os.getServerUrl() : 'http://127.0.0.1:3000';
-                setSrc(`${targetUrl}/api/os/download?path=${encodeURIComponent(filePath)}`);
+                // 🔥 CRITICAL: Normalize Windows paths to forward slashes 
+                // and append the token for the backend middleware
+                const cleanPath = filePath.replace(/\\/g, '/');
+                const secureUrl = `${targetUrl}/api/os/download?path=${encodeURIComponent(cleanPath)}&token=${encodeURIComponent(token || '')}`;
+                setSrc(secureUrl);
             }
         };
 
@@ -65,7 +70,7 @@ const SmartMedia = ({ filePath, alt, style, isThumbnail = false }) => {
                 <video
                     src={src}
                     style={{ ...style, objectFit: 'contain', backgroundColor: '#000' }}
-                    controls={!isThumbnail} // Hide controls on thumbnails, show in fullscreen
+                    controls={!isThumbnail}
                     preload="metadata"
                 />
                 {isThumbnail && (

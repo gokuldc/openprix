@@ -16,6 +16,8 @@ use crate::routes::ApiResponse;
 #[derive(Deserialize)]
 pub struct DownloadQuery {
     pub path: String,
+    #[allow(dead_code)]
+    pub token: String,
 }
 
 #[derive(Deserialize)]
@@ -139,23 +141,59 @@ pub async fn upload_file(mut multipart: Multipart) -> Json<ApiResponse<String>> 
 // 3. DOWNLOAD / PREVIEW FILE (For Site Gallery & Docs)
 // ----------------------------------------------------------------------------
 pub async fn download_file(Query(query): Query<DownloadQuery>) -> impl IntoResponse {
-    let path = Path::new(&query.path);
+    let raw_path = query.path.trim();
+    let path = Path::new(raw_path);
 
-    if let Ok(bytes) = fs::read(path) {
-        let mime = mime_guess::from_path(path)
-            .first_or_octet_stream()
-            .as_ref()
-            .to_string();
-        (StatusCode::OK, [(header::CONTENT_TYPE, mime)], bytes).into_response()
+    if !path.exists() || !path.is_file() {
+        return (StatusCode::NOT_FOUND, "File not found.").into_response();
+    }
+
+    // 1. Get the actual filename from the path (e.g., "5f3a2b1c_myphoto.jpg")
+    let raw_filename = path.file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("download");
+
+    // 2. Logic to strip the alphanumeric/timestamp prefix (e.g., "5f3a2b1c_" or "1778926637805_")
+    let clean_filename = if let Some((prefix, original)) = raw_filename.split_once('_') {
+        // Check if prefix looks like our generated code:
+        // Either 8-char hex (UUID) OR a long numeric timestamp
+        let is_uuid_prefix = prefix.len() == 8 && prefix.chars().all(|c| c.is_ascii_hexdigit());
+        let is_timestamp_prefix = prefix.chars().all(|c| c.is_ascii_digit());
+        
+        if is_uuid_prefix || is_timestamp_prefix {
+            original // Return just the clean original filename
+        } else {
+            raw_filename // Not our generated format, keep original
+        }
     } else {
-        (
-            StatusCode::NOT_FOUND,
-            "File not found on host machine.".to_string().into_bytes(),
-        )
-            .into_response()
+        raw_filename
+    };
+
+    // 3. Format the disposition header with the clean name
+    let disposition = format!("attachment; filename=\"{}\"", clean_filename);
+
+    match fs::read(path) {
+        Ok(bytes) => {
+            let mime = mime_guess::from_path(path)
+                .first_or_octet_stream()
+                .as_ref()
+                .to_string();
+
+            (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, mime),
+                    (header::CONTENT_DISPOSITION, disposition),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(e) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Read error: {}", e)).into_response()
+        }
     }
 }
-
 // ----------------------------------------------------------------------------
 // 4. OPEN NATIVE APPLICATION (AutoCAD, Excel, PDF Viewer)
 // ----------------------------------------------------------------------------

@@ -10,6 +10,14 @@ use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use std::path::Path as StdPath;
 use tokio::fs;
 
+// 🔥 IMPORT AMMONIA FOR XSS PROTECTION
+use ammonia::clean;
+
+// 🔥 HELPER: Safely sanitize optional strings
+fn sanitize_opt(input: Option<String>) -> Option<String> {
+    input.map(|s| clean(&s))
+}
+
 #[derive(Deserialize)]
 pub struct CreateProject {
     pub name: String,
@@ -23,7 +31,6 @@ pub struct CreateProject {
     pub location: Option<String>,
 }
 
-// 🔥 FULLY EXPANDED UPDATE STRUCT
 #[derive(Deserialize)]
 pub struct UpdateProject {
     pub name: Option<String>,
@@ -146,13 +153,13 @@ pub async fn add_project(
     api_response(
         sqlx::query(q)
             .bind(&id)
-            .bind(payload.name)
-            .bind(payload.code)
-            .bind(payload.client_name)
-            .bind(payload.status.unwrap_or_else(|| "Active".to_string()))
-            .bind(payload.region)
-            .bind(payload.project_type)
-            .bind(payload.location)
+            .bind(clean(&payload.name)) // 🔥 Strict sanitization applied
+            .bind(sanitize_opt(payload.code))
+            .bind(sanitize_opt(payload.client_name))
+            .bind(sanitize_opt(payload.status).unwrap_or_else(|| "Active".to_string()))
+            .bind(sanitize_opt(payload.region))
+            .bind(sanitize_opt(payload.project_type))
+            .bind(sanitize_opt(payload.location))
             .bind(created_at)
             .execute(&pool)
             .await
@@ -169,80 +176,90 @@ pub async fn update_project(
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("UPDATE projects SET ");
     let mut has_fields = false;
 
+    // 🔥 Sanitize plain text fields to prevent XSS injection
     if let Some(v) = payload.name {
-        qb.push("name = ").push_bind(v);
+        qb.push("name = ").push_bind(clean(&v));
         has_fields = true;
     }
     if let Some(v) = payload.code {
         if has_fields {
             qb.push(", ");
         }
-        qb.push("code = ").push_bind(v);
+        qb.push("code = ").push_bind(clean(&v));
         has_fields = true;
     }
     if let Some(v) = payload.client_name {
         if has_fields {
             qb.push(", ");
         }
-        qb.push("clientName = ").push_bind(v);
+        qb.push("clientName = ").push_bind(clean(&v));
         has_fields = true;
     }
     if let Some(v) = payload.status {
         if has_fields {
             qb.push(", ");
         }
-        qb.push("status = ").push_bind(v);
+        qb.push("status = ").push_bind(clean(&v));
         has_fields = true;
     }
     if let Some(v) = payload.region {
         if has_fields {
             qb.push(", ");
         }
-        qb.push("region = ").push_bind(v);
+        qb.push("region = ").push_bind(clean(&v));
         has_fields = true;
     }
     if let Some(v) = payload.project_lead {
         if has_fields {
             qb.push(", ");
         }
-        qb.push("projectLead = ").push_bind(v);
+        qb.push("projectLead = ").push_bind(clean(&v));
         has_fields = true;
     }
     if let Some(v) = payload.site_supervisor {
         if has_fields {
             qb.push(", ");
         }
-        qb.push("siteSupervisor = ").push_bind(v);
+        qb.push("siteSupervisor = ").push_bind(clean(&v));
         has_fields = true;
     }
     if let Some(v) = payload.pmc {
         if has_fields {
             qb.push(", ");
         }
-        qb.push("pmc = ").push_bind(v);
+        qb.push("pmc = ").push_bind(clean(&v));
         has_fields = true;
     }
     if let Some(v) = payload.architect {
         if has_fields {
             qb.push(", ");
         }
-        qb.push("architect = ").push_bind(v);
+        qb.push("architect = ").push_bind(clean(&v));
         has_fields = true;
     }
     if let Some(v) = payload.structural_engineer {
         if has_fields {
             qb.push(", ");
         }
-        qb.push("structuralEngineer = ").push_bind(v);
+        qb.push("structuralEngineer = ").push_bind(clean(&v));
         has_fields = true;
     }
-    if let Some(v) = payload.is_price_locked {
+    if let Some(v) = payload.project_type {
         if has_fields {
             qb.push(", ");
         }
-        qb.push("isPriceLocked = ").push_bind(v);
+        qb.push("type = ").push_bind(clean(&v));
         has_fields = true;
     }
+    if let Some(v) = payload.location {
+        if has_fields {
+            qb.push(", ");
+        }
+        qb.push("location = ").push_bind(clean(&v));
+        has_fields = true;
+    }
+
+    // ⚠️ DO NOT run ammonia on structured JSON blobs or system paths, as escaping quotes will break the frontend parsers
     if let Some(v) = payload.daily_logs {
         if has_fields {
             qb.push(", ");
@@ -306,39 +323,11 @@ pub async fn update_project(
         qb.push("grns = ").push_bind(v);
         has_fields = true;
     }
-    if let Some(v) = payload.project_type {
-        if has_fields {
-            qb.push(", ");
-        }
-        qb.push("type = ").push_bind(v);
-        has_fields = true;
-    }
-    if let Some(v) = payload.location {
-        if has_fields {
-            qb.push(", ");
-        }
-        qb.push("location = ").push_bind(v);
-        has_fields = true;
-    }
-    if let Some(v) = payload.is_scaffolded {
-        if has_fields {
-            qb.push(", ");
-        }
-        qb.push("isScaffolded = ").push_bind(v);
-        has_fields = true;
-    }
     if let Some(v) = payload.scaffold_path {
         if has_fields {
             qb.push(", ");
         }
         qb.push("scaffoldPath = ").push_bind(v);
-        has_fields = true;
-    }
-    if let Some(v) = payload.is_manually_linked {
-        if has_fields {
-            qb.push(", ");
-        }
-        qb.push("isManuallyLinked = ").push_bind(v);
         has_fields = true;
     }
     if let Some(v) = payload.daily_schedules {
@@ -360,6 +349,29 @@ pub async fn update_project(
             qb.push(", ");
         }
         qb.push("assignedStaff = ").push_bind(v);
+        has_fields = true;
+    }
+
+    // Numbers are inherently safe
+    if let Some(v) = payload.is_price_locked {
+        if has_fields {
+            qb.push(", ");
+        }
+        qb.push("isPriceLocked = ").push_bind(v);
+        has_fields = true;
+    }
+    if let Some(v) = payload.is_scaffolded {
+        if has_fields {
+            qb.push(", ");
+        }
+        qb.push("isScaffolded = ").push_bind(v);
+        has_fields = true;
+    }
+    if let Some(v) = payload.is_manually_linked {
+        if has_fields {
+            qb.push(", ");
+        }
+        qb.push("isManuallyLinked = ").push_bind(v);
         has_fields = true;
     }
 
@@ -449,10 +461,10 @@ pub async fn save_project_doc(
         sqlx::query(q)
             .bind(&id)
             .bind(payload.project_id)
-            .bind(payload.name)
-            .bind(payload.category)
-            .bind(payload.file_path)
-            .bind(payload.file_type)
+            .bind(clean(&payload.name)) // 🔥 Strict sanitization applied
+            .bind(clean(&payload.category)) // 🔥 Strict sanitization applied
+            .bind(payload.file_path) // Path is generated server-side, safe
+            .bind(payload.file_type) // Extension is vetted server-side, safe
             .bind(added_at)
             .execute(&pool)
             .await

@@ -3,7 +3,6 @@
 
 use crate::routes::auth::{Claims, JWT_SECRET};
 use axum::extract::ConnectInfo;
-use axum::http::Request;
 use axum::{
     Router,
     extract::DefaultBodyLimit,
@@ -216,40 +215,43 @@ async fn restrict_to_localhost(
 }
 // 🔥 THE JWT AUTHENTICATION GATEKEEPER
 async fn require_jwt_auth(
-    mut request: Request<axum::body::Body>,
+    mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Result<axum::response::Response, StatusCode> {
-    // 1. Extract the Authorization header
-    let auth_header = request
+    // 1. Try to extract token from Header (for API/Uploads)
+    // 2. If missing, try to extract from Query String (for Downloads)
+    let token = request
         .headers()
         .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok());
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .map(|t| t.to_string())
+        .or_else(|| {
+            // Try query string '?token=...'
+            request.uri().query().and_then(|q| {
+                q.split('&')
+                    .find(|p| p.starts_with("token="))
+                    .map(|p| p.replace("token=", ""))
+            })
+        });
 
-    let auth_header = match auth_header {
-        Some(header) => header,
+    let token = match token {
+        Some(t) => t,
         None => return Err(StatusCode::UNAUTHORIZED),
     };
 
-    // 2. Strip the "Bearer " prefix
-    if !auth_header.starts_with("Bearer ") {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    let token = &auth_header[7..];
-
-    // 3. Cryptographically verify the token
+    // 3. Verify
     match decode::<Claims>(
-        token,
+        &token,
         &DecodingKey::from_secret(JWT_SECRET),
         &Validation::default(),
     ) {
         Ok(token_data) => {
-            // Optional: You can insert the user's ID into the request extensions
-            // so your downstream database routes know exactly who is making the request!
             request.extensions_mut().insert(token_data.claims);
             Ok(next.run(request).await)
         }
-        Err(_) => {
-            println!("🚨 SECURITY BLOCK: Rejected request with invalid or expired token.");
+        Err(e) => {
+            println!("🚨 SECURITY: Token invalid/expired: {:?}", e);
             Err(StatusCode::UNAUTHORIZED)
         }
     }
@@ -293,8 +295,8 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let cors = CorsLayer::new()
         .allow_origin(tower_http::cors::Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
-        .allow_headers(tower_http::cors::Any);
+        .allow_headers(tower_http::cors::Any)
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE]);
 
     // 🔥 ISOLATED OS ROUTES (Protected by Middleware)
     let os_routes = Router::new()
@@ -302,7 +304,6 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/scan", post(routes::os::scan_directory))
         .route("/scaffold", post(routes::os::scaffold_project))
         .route("/upload", post(routes::os::upload_file))
-        .route("/download", get(routes::os::download_file))
         .route("/open", post(routes::os::open_file))
         .route("/db/backup", post(routes::db::backup_database)) // Moved DB ops to OS group
         .route("/db/restore", post(routes::db::restore_database)) // Moved DB ops to OS group
@@ -320,6 +321,8 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
             "/api/settings/{key}",
             get(routes::settings::get_settings).post(routes::settings::save_settings),
         )
+        // SECURE DOWNLOAD ROUTE: Available to any remote client with a valid token
+        .route("/api/os/download", get(routes::os::download_file))
         // Projects
         .route(
             "/api/projects",
@@ -371,6 +374,10 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/api/messages",
             get(routes::messages::get_messages).post(routes::messages::save_message),
+        )
+        .route(
+            "/api/messages/upload",
+            post(routes::messages::upload_chat_file),
         )
         .route(
             "/api/messages/{id}",

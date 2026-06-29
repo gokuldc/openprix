@@ -139,13 +139,59 @@ const osNetworkCalls = {
         }
     },
 
+    // 🔥 FIX: Properly route native desktop opens vs remote web opens
     openFile: async (filePath) => {
-        if (isTauri) {
-            return restCall('POST', '/api/os/open', { path: filePath });
+        if (isTauri && tauriInvoke) {
+            // If on the host server running Tauri, use the native OS command to launch AutoCAD/Excel
+            return tauriInvoke('os_open_file', { filePath });
         } else {
-            const streamUrl = `${SERVER_URL}/api/os/download?path=${encodeURIComponent(filePath)}`;
+            // If remote web client, stream it to a new browser tab for viewing
+            const token = localStorage.getItem('openprix_token');
+            const cleanPath = filePath.replace(/\\/g, '/');
+            const streamUrl = `${SERVER_URL}/api/os/download?path=${encodeURIComponent(cleanPath)}&token=${encodeURIComponent(token || '')}`;
             window.open(streamUrl, '_blank');
             return { success: true };
+        }
+    },
+
+    // 🔥 NEW: Dedicated Download Bridge with UX Notifications for Tauri
+    downloadFile: async (filePath, fileName) => {
+        const token = localStorage.getItem('openprix_token');
+        const cleanPath = filePath.replace(/\\/g, '/');
+        const encodedPath = encodeURIComponent(cleanPath);
+
+        if (isTauri) {
+            // UX: Tell the user the background download has started!
+            osNetworkCalls.sendNotification("Download Started", `Fetching ${fileName}...`);
+
+            try {
+                const res = await fetch(`${SERVER_URL}/api/os/download?path=${encodedPath}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (!res.ok) throw new Error(`Server rejected request (${res.status})`);
+
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName || 'downloaded_file';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+
+                // UX: Tell the user it's ready!
+                osNetworkCalls.sendNotification("Download Complete", `${fileName} is ready.`);
+            } catch (e) {
+                console.error("Tauri Download Error:", e);
+                osNetworkCalls.sendNotification("Download Failed", e.message);
+            }
+        } else {
+            // For standard web browsers, we just let Chrome/Edge handle the download progress UI natively
+            const streamUrl = `${SERVER_URL}/api/os/download?path=${encodedPath}&token=${encodeURIComponent(token || '')}`;
+            window.open(streamUrl, '_blank');
         }
     },
 
@@ -253,6 +299,26 @@ window.api = {
         getPrivateMessages: (u1, u2) => restCall('GET', `/api/private-messages/${u1}/${u2}`),
         savePrivateMessage: (data) => restCall('POST', '/api/private-messages', data),
         deletePrivateMessage: (id) => restCall('DELETE', `/api/private-messages/${id}`),
+        // CHAT UPLOAD BRIDGE
+        uploadChatAttachment: async (fileObject) => {
+            const formData = new FormData();
+            formData.append('file', fileObject);
+            const token = localStorage.getItem('openprix_token');
+
+            try {
+                const res = await fetch(`${SERVER_URL}/api/messages/upload`, {
+                    method: 'POST',
+                    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+                    body: formData
+                });
+                const rawText = await res.text();
+                let json;
+                try { json = JSON.parse(rawText); } catch (e) { return { success: false, error: rawText }; }
+                return json.success !== false ? (json.data !== undefined ? json.data : json) : json;
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        },
         checkNotifications: (id, lc) => restCall('GET', `/api/notifications/check?userId=${id}&lastChecked=${lc}`),
         getKanbanTasks: () => restCall('GET', '/api/kanban'),
     },
