@@ -15,9 +15,9 @@ import ResourcesTab from "./database/ResourcesTab";
 import CreateBoqTab from "./database/CreateBoqTab";
 import ViewBoqTab from "./database/ViewBoqTab";
 import BackupRestoreTab from "./database/BackupRestoreTab";
+import ConfirmDeleteModal from "./database/ConfirmDeleteModal"; // Ensure this path is correct
 
 import { useAuth } from "../context/AuthContext";
-// 🔥 REACT QUERY HOOKS
 import { useQueryClient } from '@tanstack/react-query';
 import { useRegions, useResources, useMasterBoqs, useDeleteMasterBoq } from '../hooks/useQueries';
 
@@ -25,11 +25,19 @@ export default function DatabaseEditor() {
     const { hasClearance, currentUser } = useAuth();
     const queryClient = useQueryClient();
 
+    // UI States
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [editingBoq, setEditingBoq] = useState(null);
+    
+    // 🔥 DELETE MODAL STATE
+    const [deleteModal, setDeleteModal] = useState({ 
+        open: false, 
+        id: null, 
+        label: "" 
+    });
+
     const SIDEBAR_CLOSED_WIDTH = 68;
     const SIDEBAR_OPEN_WIDTH = 260;
-
-    const [editingBoq, setEditingBoq] = useState(null);
 
     // 🔥 AUTOMATIC DATA FETCHING
     const { data: regions = [] } = useRegions();
@@ -37,7 +45,7 @@ export default function DatabaseEditor() {
     const { data: rawMasterBoqs = [] } = useMasterBoqs();
     const deleteMasterBoqMutation = useDeleteMasterBoq();
 
-    // 🔥 SAFE PARSING VIA USEMEMO (Lightning fast caching)
+    // 🔥 SAFE PARSING VIA USEMEMO
     const resources = useMemo(() => {
         const parseSafe = (str, fallback = []) => {
             if (!str) return fallback;
@@ -56,8 +64,7 @@ export default function DatabaseEditor() {
         return rawMasterBoqs.map(b => ({ ...b, components: parseSafe(b.components, []) }));
     }, [rawMasterBoqs]);
 
-    // 🔥 TRANSITIONAL LOADDATA: Tells React Query to refresh the cache!
-    // Passed to downstream components so they don't break.
+    // 🔥 REFRESH CACHE
     const loadData = () => {
         queryClient.invalidateQueries({ queryKey: ['regions'] });
         queryClient.invalidateQueries({ queryKey: ['resources'] });
@@ -74,10 +81,19 @@ export default function DatabaseEditor() {
 
     const canAccess = (minClearance, id) => hasClearance(minClearance) || userPerms.includes(id);
 
-    const deleteMasterBoq = async (id) => {
+    // 🔥 MODAL HANDLERS
+    const openDeleteConfirmation = (id, label) => {
         if (!canAccess(3, 'viewBoq')) return alert("Access Denied: Clearance required.");
-        if (window.confirm("Delete this Databook item?")) {
-            await deleteMasterBoqMutation.mutateAsync(id);
+        setDeleteModal({ open: true, id, label });
+    };
+
+    const handleConfirmDelete = async () => {
+        try {
+            await deleteMasterBoqMutation.mutateAsync(deleteModal.id);
+        } catch (error) {
+            console.error("Delete failed:", error);
+        } finally {
+            setDeleteModal({ open: false, id: null, label: "" });
         }
     };
 
@@ -100,7 +116,7 @@ export default function DatabaseEditor() {
             { id: "backup", label: "BACKUP & RESTORE", minClearance: 5, icon: <SettingsBackupRestoreOutlinedIcon />, color: '#ef4444' }
         ];
         return items.filter(item => canAccess(item.minClearance, item.id));
-    }, [editingBoq, hasClearance, userPerms]);
+    }, [editingBoq, currentUser, userPerms]);
 
     const [tab, setTab] = useState(PERMITTED_NAV_ITEMS[0]?.id || "resources");
 
@@ -116,6 +132,7 @@ export default function DatabaseEditor() {
 
     return (
         <Box sx={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>
+            {/* SIDEBAR */}
             <Paper elevation={0} sx={{ width: sidebarOpen ? SIDEBAR_OPEN_WIDTH : { xs: 0, md: SIDEBAR_CLOSED_WIDTH }, flexShrink: 0, bgcolor: 'rgba(13, 31, 60, 0.5)', borderRight: '1px solid', borderColor: 'divider', transition: 'width 0.225s cubic-bezier(0.4, 0, 0.2, 1)', overflowX: 'hidden', display: 'flex', flexDirection: 'column', position: { xs: 'fixed', md: 'relative' }, height: '100%', zIndex: { xs: 1100, md: 1 }, left: 0, top: 0 }}>
                 <Box sx={{ p: 1, display: 'flex', justifyContent: sidebarOpen ? 'flex-end' : 'center', alignItems: 'center', height: 60 }}>
                     <IconButton onClick={() => setSidebarOpen(!sidebarOpen)} sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
@@ -146,8 +163,10 @@ export default function DatabaseEditor() {
                 </Box>
             </Paper>
 
+            {/* MOBILE OVERLAY */}
             {sidebarOpen && <Box onClick={() => setSidebarOpen(false)} sx={{ display: { xs: 'block', md: 'none' }, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, bgcolor: 'rgba(0,0,0,0.5)', zIndex: 1000 }} />}
 
+            {/* MAIN CONTENT AREA */}
             <Box sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', overflowX: 'hidden', p: { xs: 2, md: 3 } }}>
                 <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', lg: 'center' }, mb: 4, pb: 3, borderBottom: '1px solid', borderColor: 'divider', gap: { xs: 2, lg: 0 } }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -162,11 +181,31 @@ export default function DatabaseEditor() {
 
                 <Box sx={{ flexGrow: 1 }}>
                     {tab === "resources" && canAccess(2, 'resources') && <ResourcesTab regions={regions} resources={resources} loadData={loadData} />}
-                    {tab === "viewBoq" && canAccess(2, 'viewBoq') && <ViewBoqTab masterBoqs={masterBoqs} regions={regions} resources={resources} onEditBoq={handleEditBoq} deleteMasterBoq={deleteMasterBoq} loadData={loadData} />}
+                    
+                    {tab === "viewBoq" && canAccess(2, 'viewBoq') && (
+                        <ViewBoqTab 
+                            masterBoqs={masterBoqs} 
+                            regions={regions} 
+                            resources={resources} 
+                            onEditBoq={handleEditBoq} 
+                            deleteMasterBoq={openDeleteConfirmation} // Trigger Modal instead of Alert
+                            loadData={loadData} 
+                        />
+                    )}
+
                     {tab === "createBoq" && canAccess(3, 'createBoq') && <CreateBoqTab regions={regions} resources={resources} masterBoqs={masterBoqs} loadData={loadData} editingBoq={editingBoq} clearEdit={clearEdit} />}
+                    
                     {tab === "backup" && canAccess(5, 'backup') && <BackupRestoreTab loadData={loadData} />}
                 </Box>
             </Box>
+
+            {/* 🔥 REUSABLE DELETE MODAL */}
+            <ConfirmDeleteModal 
+                open={deleteModal.open}
+                itemName={deleteModal.label}
+                onClose={() => setDeleteModal({ open: false, id: null, label: "" })}
+                onConfirm={handleConfirmDelete}
+            />
         </Box>
     );
 }

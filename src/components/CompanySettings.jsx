@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     Box, TextField, Button, Typography, Avatar, IconButton,
     MenuItem, Divider, Paper, Grid, Tooltip, List, ListItem,
-    ListItemButton, ListItemIcon, ListItemText, alpha, useTheme, Autocomplete, Chip
+    ListItemButton, ListItemIcon, ListItemText, alpha, useTheme, Autocomplete, Chip,Fade
 } from '@mui/material';
 
 // Icons
@@ -17,11 +17,11 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 
 import { debounce } from 'lodash';
 import { useSettings } from '../context/SettingsContext';
-
+import "../styles/CompanySettings.css"
 export default function CompanySettings() {
     const theme = useTheme();
     const { refreshSettings } = useSettings();
-
+const [errors, setErrors] = useState({ email: false, phone: false });
     // --- SIDEBAR STATE ---
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const SIDEBAR_CLOSED_WIDTH = 68;
@@ -63,7 +63,23 @@ export default function CompanySettings() {
             return updated;
         });
     };
+// Handler for Phone: Blocks typing after 10 digits and allows only numbers
+const handlePhoneChange = (e) => {
+    const val = e.target.value.replace(/\D/g, ''); // Remove all non-digits
+    if (val.length <= 10) {
+        updateInfo('phone', val);
+        // Set error if user stops before 10 digits
+        setErrors(prev => ({ ...prev, phone: val.length !== 10 && val.length > 0 }));
+    }
+};
 
+// Handler for Email: Validates the @ symbol
+const handleEmailChange = (e) => {
+    const val = e.target.value;
+    updateInfo('email', val);
+    const hasAt = val.includes('@');
+    setErrors(prev => ({ ...prev, email: !hasAt && val.length > 0 }));
+};
     const updateInfoList = (field, updatedList) => {
         setInfo(prev => {
             // Ensure elements are trimmed strings and formatted correctly for extensions
@@ -160,7 +176,7 @@ export default function CompanySettings() {
 
     const NAV_ITEMS = [
         { id: "profile", label: "COMPANY PROFILE", icon: <BusinessIcon />, color: '#3b82f6' },
-        { id: "organization", label: "ORGANIZATION DEPARTMENTS", icon: <AccountTreeIcon />, color: '#8b5cf6' },
+        { id: "organization", label: "DEPARTMENTS", icon: <AccountTreeIcon />, color: '#8b5cf6' },
         { id: "regional", label: "REGIONAL STANDARDS", icon: <PublicIcon />, color: '#10b981' },
         { id: "automation", label: "FILE AUTOMATION & RULES", icon: <FolderSpecialIcon />, color: '#f59e0b' }, // 🔥 Updated label
     ];
@@ -204,25 +220,115 @@ export default function CompanySettings() {
                 </Box>
 
                 <Box sx={{ width: '100%', flexGrow: 1 }}>
-                    {activeTab === "profile" && (
-                        <Grid container spacing={3}>
-                            <Grid item xs={12}>
-                                <Box display="flex" alignItems="center" gap={3} mb={2}>
-                                    <Avatar src={info.logo} variant="rounded" sx={{ width: 100, height: 100, bgcolor: 'rgba(0,0,0,0.3)', border: '1px dashed rgba(255,255,255,0.2)' }}><BusinessIcon sx={{ fontSize: 40, opacity: 0.2 }} /></Avatar>
-                                    <Box>
-                                        <Button variant="outlined" startIcon={<CloudUploadIcon />} onClick={handleLogoUpload} size="small" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>UPLOAD LOGO</Button>
-                                        <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1, fontFamily: "'JetBrains Mono', monospace" }}>Required for PDF report branding.</Typography>
-                                    </Box>
-                                    {info.logo && <IconButton color="error" onClick={() => updateInfo('logo', "")}><DeleteIcon /></IconButton>}
-                                </Box>
-                            </Grid>
-                            <Grid item xs={12} md={6} lg={4}><TextField fullWidth label="COMPANY / FIRM NAME" value={info.name} onChange={e => updateInfo('name', e.target.value)} size="small" /></Grid>
-                            <Grid item xs={12} md={6} lg={4}><TextField fullWidth label="TAX ID / GSTIN" value={info.taxId} onChange={e => updateInfo('taxId', e.target.value)} size="small" /></Grid>
-                            <Grid item xs={12} lg={8}><TextField fullWidth multiline rows={2} label="OFFICE ADDRESS" value={info.address} onChange={e => updateInfo('address', e.target.value)} size="small" /></Grid>
-                            <Grid item xs={12} md={6} lg={4}><TextField fullWidth label="OFFICIAL EMAIL" value={info.email} onChange={e => updateInfo('email', e.target.value)} size="small" /></Grid>
-                            <Grid item xs={12} md={6} lg={4}><TextField fullWidth label="CONTACT NO." value={info.phone} onChange={e => updateInfo('phone', e.target.value)} size="small" /></Grid>
+                   {activeTab === "profile" && (
+    <Fade in={true}>
+        <Box className="profile-grid-container">
+            <Grid container spacing={4}>
+                
+                {/* LEFT: LOGO SECTION */}
+                <Grid item xs={12} md={3} lg={2.5}>
+                    <Box display="flex" flexDirection="column" alignItems="center">
+                        <Box className="profile-logo-frame">
+                            {info.logo ? (
+                                <img src={info.logo} alt="Company Logo" />
+                            ) : (
+                                <BusinessIcon sx={{ fontSize: 60, opacity: 0.1, color: '#00f2ff' }} />
+                            )}
+                        </Box>
+                        <Button 
+                            variant="text" 
+                            startIcon={<CloudUploadIcon />} 
+                            onClick={handleLogoUpload}
+                            sx={{ 
+                                mt: 2, 
+                                fontSize: '10px', 
+                                fontFamily: "'JetBrains Mono', monospace",
+                                color: '#00f2ff'
+                            }}
+                        >
+                            {info.logo ? "CHANGE_LOGO" : "UPLOAD_LOGO"}
+                        </Button>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', mt: 1, textAlign: 'center', fontSize: '9px' }}>
+                            REQUIRED FOR PDF BRANDING
+                        </Typography>
+                    </Box>
+                </Grid>
+
+                {/* RIGHT: DATA SECTION */}
+                <Grid item xs={12} md={9} lg={9.5}>
+                    <Grid container spacing={3}>
+                        {/* Row 1 */}
+                        <Grid item xs={12} md={8}>
+                            <TextField 
+                                fullWidth 
+                                className="profile-field"
+                                label="COMPANY_IDENTIFIER / FIRM NAME" 
+                                value={info.name} 
+                                onChange={e => updateInfo('name', e.target.value)} 
+                            />
                         </Grid>
-                    )}
+                        <Grid item xs={12} md={4}>
+                            <TextField 
+                                fullWidth 
+                                className="profile-field"
+                                label="TAX_ID / GSTIN" 
+                                value={info.taxId} 
+                                onChange={e => updateInfo('taxId', e.target.value)} 
+                            />
+                        </Grid>
+
+                        {/* Row 2 */}
+                        <Grid item xs={12}>
+                            <TextField 
+                                fullWidth 
+                                multiline 
+                                rows={2} 
+                                className="profile-field"
+                                label="PHYSICAL_OFFICE_ADDRESS" 
+                                value={info.address} 
+                                onChange={e => updateInfo('address', e.target.value)} 
+                            />
+                        </Grid>
+
+                        {/* Row 3 */}
+                        {/* Row 3 */}
+<Grid item xs={12} md={6}>
+    <TextField 
+        fullWidth 
+        className="profile-field"
+        label="OFFICIAL_SYSTEM_EMAIL" 
+        value={info.email} 
+        onChange={handleEmailChange}
+        error={errors.email}
+        helperText={errors.email ? "INVALID_FORMAT: '@' is compulsory" : ""}
+        inputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }}
+    />
+</Grid>
+
+<Grid item xs={12} md={6}>
+    <TextField 
+        fullWidth 
+        className="profile-field"
+        label="PRIMARY_CONTACT_NO (10 DIGITS)" 
+        value={info.phone} 
+        onChange={handlePhoneChange}
+        error={errors.phone}
+        helperText={errors.phone ? "REQUIRED: Exactly 10 digits" : `${info.phone.length}/10`}
+        // This ensures only the numeric keypad shows on mobile
+        type="tel" 
+        inputProps={{ 
+            maxLength: 10,
+            sx: { fontFamily: "'JetBrains Mono', monospace" } 
+        }}
+    />
+</Grid>
+                    </Grid>
+                </Grid>
+
+            </Grid>
+        </Box>
+    </Fade>
+)}
 
                     {activeTab === "organization" && (
                         <Grid container spacing={3}>
