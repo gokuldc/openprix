@@ -32,7 +32,7 @@ export default function Login() {
                     <Box display="flex" flexDirection="column" alignItems="center" mb={4}>
                         <ShieldIcon sx={{ color: '#00f2ff', fontSize: 40, mb: 1, filter: 'drop-shadow(0 0 8px rgba(0,242,255,0.4))' }} />
                         <Typography variant="h5" className="brand-logo" sx={{ fontFamily: "'JetBrains Mono', monospace", color: '#00f2ff', fontWeight: 800 }}>
-                            OPENPRIX
+                            BRIX
                         </Typography>
                         <Typography variant="caption" sx={{ fontFamily: "'JetBrains Mono', monospace", color: '#64ffda', mt: 1, opacity: 0.7 }}>
                             VERIFYING SYSTEM IDENTITY...

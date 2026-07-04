@@ -24,6 +24,45 @@ import {
 } from "../../hooks/useQueries";
 import { useProjectCalculations } from "../../hooks/useProjectCalculations";
 
+const CATEGORIES = [
+    "2. Earth Work",
+    "3. Mortars",
+    "4. Concrete work",
+    "5. Reinforced Cement Concrete",
+    "6. Brick Work",
+    "7. Stone Work",
+    "8. Marble & Granite Work",
+    "9. Wood and PVC Work",
+    "10. Steel Work",
+    "11. Flooring",
+    "12. Roofing",
+    "13. Finishing",
+    "14. Repairs to Buildings",
+    "15. Dismantling and Demolishing",
+    "16. Road Work",
+    "17. Sanitary Installations",
+    "18. Water Supply",
+    "19. Drainage",
+    "20. Pile Work",
+    "21. Aluminium Work",
+    "22. Water Proofing",
+    "23. Rain Water Harvesting & Tubewells",
+    "24. Conservation of Heritage Buildings",
+    "25. Structural Glazing & Aluminium Composite Panel",
+    "26. New Technologies and Materials",
+    "30. Horticulture",
+    "49. Horticulture and Landscaping",
+    "50. Approved Observed data",
+    "51. Approved OD for LSGD",
+    "56. Investigation Rate",
+    "60. OD Irrigation",
+    "65. OD Harbour",
+    "70. OD Ports",
+    "72. KSEB Approved Data",
+    "85. OD Mechanical",
+    "100. KWA Approved Data"
+];
+
 // ============================================================================
 // 🧩 SUB-COMPONENT 1: THE ADD FORM (Standard)
 // ============================================================================
@@ -31,6 +70,7 @@ const BoqAddForm = ({ projectId, projectBoqItems, masterBoqs, saveBoqMutation })
     const [addMode, setAddMode] = useState("master");
     const [searchCode, setSearchCode] = useState("");
     const [searchDesc, setSearchDesc] = useState("");
+    const [selectedCategory, setSelectedCategory] = useState("");
     const [addBoqId, setAddBoqId] = useState("");
     const [addBoqQty, setAddBoqQty] = useState("");
     const [customCode, setCustomCode] = useState("");
@@ -46,10 +86,26 @@ const BoqAddForm = ({ projectId, projectBoqItems, masterBoqs, saveBoqMutation })
         return Array.from(phases);
     }, [projectBoqItems]);
 
-    const filteredMasterBoqs = useMemo(() => (masterBoqs || []).filter(b =>
-        (b.itemCode || "").toLowerCase().includes(searchCode.toLowerCase()) &&
-        (b.description || "").toLowerCase().includes(searchDesc.toLowerCase())
-    ), [masterBoqs, searchCode, searchDesc]);
+    const filteredMasterBoqs = useMemo(() => {
+        return (masterBoqs || []).filter(b => {
+            const matchCode = (b.itemCode || "").toLowerCase().includes(searchCode.toLowerCase());
+            const matchDesc = (b.description || "").toLowerCase().includes(searchDesc.toLowerCase());
+            
+            let matchCat = true;
+            if (selectedCategory) {
+                const match = selectedCategory.match(/^(\d+)\./);
+                if (match) {
+                    const sectionNum = match[1];
+                    const normalizedCode = (b.itemCode || '').trim();
+                    matchCat = normalizedCode.startsWith(`${sectionNum}.`) || 
+                               normalizedCode === sectionNum ||
+                               normalizedCode.startsWith(`0${sectionNum}.`) ||
+                               normalizedCode === `0${sectionNum}`;
+                }
+            }
+            return matchCode && matchDesc && matchCat;
+        });
+    }, [masterBoqs, searchCode, searchDesc, selectedCategory]);
 
     const submitMaster = async () => {
         if (!addBoqId || !addBoqQty) return alert("Select an item and enter quantity.");
@@ -74,8 +130,24 @@ const BoqAddForm = ({ projectId, projectBoqItems, masterBoqs, saveBoqMutation })
                 {addMode === "master" ? (
                     <Box display="flex" flexDirection="column" gap={2}>
                         <Box display="flex" gap={2} flexDirection={{ xs: 'column', md: 'row' }}>
-                            <TextField fullWidth size="small" placeholder="Search Code..." value={searchCode} onChange={e => setSearchCode(e.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                            <TextField fullWidth size="small" placeholder="Search Description..." value={searchDesc} onChange={e => setSearchDesc(e.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                            <TextField fullWidth size="small" placeholder="Search Code..." value={searchCode} onChange={e => setSearchCode(e.target.value)} sx={{ flex: 1 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                            <TextField fullWidth size="small" placeholder="Search Description..." value={searchDesc} onChange={e => setSearchDesc(e.target.value)} sx={{ flex: 1.5 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                            <TextField
+                                select
+                                fullWidth
+                                size="small"
+                                label="CATEGORY"
+                                value={selectedCategory}
+                                onChange={e => setSelectedCategory(e.target.value)}
+                                sx={{ flex: 1.2 }}
+                                InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }}
+                                InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}
+                            >
+                                <MenuItem value="" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>---select---</MenuItem>
+                                {CATEGORIES.map(cat => (
+                                    <MenuItem key={cat} value={cat} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{cat}</MenuItem>
+                                ))}
+                            </TextField>
                         </Box>
                         <TextField select fullWidth size="small" label="SELECT_ITEM" value={addBoqId} onChange={e => setAddBoqId(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}>
                             <MenuItem value="">-- CHOOSE_MASTER_BOQ --</MenuItem>

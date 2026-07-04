@@ -38,7 +38,7 @@ export default function ConnectPortal({ onConnected }) {
     return (
         <div style={styles.body}>
             <div style={styles.container}>
-                <h1 style={styles.h1}>// OPENPRIX_CLIENT</h1>
+                <h1 style={styles.h1}>// BRIX_CLIENT</h1>
                 <p style={styles.p}>Enter the IPv4 Address or Hostname of the Server Daemon.</p>
 
                 <input

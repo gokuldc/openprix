@@ -32,7 +32,7 @@ export default function Navbar({ onMenuToggle, onOpenAbout, onToggleTheme, mode,
                         onClick={onHomeClick} 
                         className="nav-logo"
                     >
-                        {'//'} OPENPRIX
+                        {'//'} BRIX
                     </Typography>
                 </Box>
 

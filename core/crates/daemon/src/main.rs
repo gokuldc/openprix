@@ -419,6 +419,10 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         )
         // Resources & CRM
         .route(
+            "/api/resources/bulk",
+            post(routes::resources::bulk_save_resources),
+        )
+        .route(
             "/api/resources",
             get(routes::resources::get_resources).post(routes::resources::save_resource),
         )
