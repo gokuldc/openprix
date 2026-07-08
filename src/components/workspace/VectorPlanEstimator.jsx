@@ -431,8 +431,10 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
     const wallThicknessVal = results?.wall_thickness_m || 0;
     const ceilingHeightVal = parseFloat(height) || 0;
 
-    const blockWorkVolume = results ? (wallLength * wallThicknessVal * ceilingHeightVal).toFixed(2) : '0.00';
-    const plasterPainting = results ? (wallLength * ceilingHeightVal).toFixed(2) : '0.00';
+    const blockWorkVolume = results?.block_work_cum ?? '0.00';
+    const plasterPainting = results?.plastering_sqm ?? '0.00';
+    const blockCount = results?.block_count ?? 0;
+    const netVolume = results?.net_volume_cum ?? '0.00';
 
     return (
         <Paper
@@ -551,8 +553,8 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                     fontSize: '9px', 
                                                     fontFamily: "'JetBrains Mono', monospace", 
                                                     fontWeight: 'bold',
-                                                    bgcolor: '#00e676',
-                                                    color: '#000',
+                                                    bgcolor: '#2ecc71',
+                                                    color: '#fff',
                                                     animation: 'pulseSuccess 0.8s infinite alternate',
                                                     '@keyframes pulseSuccess': {
                                                         '0%': { opacity: 0.7 },
@@ -570,8 +572,8 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                     fontSize: '9px', 
                                                     fontFamily: "'JetBrains Mono', monospace", 
                                                     fontWeight: 'bold',
-                                                    bgcolor: '#00d2f6',
-                                                    color: '#000',
+                                                    bgcolor: '#3498db',
+                                                    color: '#fff',
                                                     animation: 'pulseInfo 0.8s infinite alternate',
                                                     '@keyframes pulseInfo': {
                                                         '0%': { opacity: 0.7 },
@@ -664,13 +666,13 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                 key={`vertex-${idx}`}
                                                 sx={{
                                                     position: 'absolute',
-                                                    width: 8,
-                                                    height: 8,
-                                                    bgcolor: 'rgba(59, 130, 246, 0.65)', // Premium blue color
+                                                    width: 6,
+                                                    height: 6,
+                                                    bgcolor: 'rgba(41, 128, 185, 0.8)', // Professional deeper blue
                                                     borderRadius: '50%',
                                                     transform: 'translate(-50%, -50%)',
-                                                    border: '1.5px solid #ffffff',
-                                                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                                                    border: '1px solid #ffffff',
+                                                    boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
                                                     zIndex: 8,
                                                     pointerEvents: 'none'
                                                 }}
@@ -697,10 +699,10 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                         position: 'absolute',
                                                         width: 12,
                                                         height: 12,
-                                                        bgcolor: '#00e676', // Pure material green
+                                                        bgcolor: '#2ecc71', // Professional material green
                                                         borderRadius: '50%',
                                                         transform: 'translate(-50%, -50%)',
-                                                        boxShadow: '0 0 10px #00e676, 0 0 20px #00e676',
+                                                        boxShadow: '0 0 8px #2ecc71, 0 0 15px #2ecc71',
                                                         zIndex: 21,
                                                         pointerEvents: 'none',
                                                         animation: 'blinkDot 0.4s infinite alternate',
@@ -716,7 +718,7 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                         position: 'absolute',
                                                         width: 24,
                                                         height: 24,
-                                                        border: '2px solid #00e676',
+                                                        border: '2px solid #2ecc71',
                                                         borderRadius: '50%',
                                                         transform: 'translate(-50%, -50%)',
                                                         zIndex: 20,
@@ -755,7 +757,7 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                     y1={snapSegment.p1.yPct * canvasSize.height}
                                                     x2={snapSegment.p2.xPct * canvasSize.width}
                                                     y2={snapSegment.p2.yPct * canvasSize.height}
-                                                    stroke="#00e676"
+                                                    stroke="#3498db"
                                                     strokeWidth="3.5"
                                                     style={{
                                                         animation: 'pulseLine 0.6s infinite alternate'
@@ -765,16 +767,170 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                     cx={snapSegment.p1.xPct * canvasSize.width}
                                                     cy={snapSegment.p1.yPct * canvasSize.height}
                                                     r="6"
-                                                    fill="#00e676"
+                                                    fill="#3498db"
                                                 />
                                                 <circle
                                                     cx={snapSegment.p2.xPct * canvasSize.width}
                                                     cy={snapSegment.p2.yPct * canvasSize.height}
                                                     r="6"
-                                                    fill="#00e676"
+                                                    fill="#3498db"
                                                 />
                                             </Box>
                                         )}
+
+                                        {/* Render Computational Geometry Polygons */}
+                                        {!isModelEstimator && (() => {
+                                            const labelPositions = [];
+                                            return results?.polygons?.map((poly, idx) => {
+                                                const pointsStr = poly.vertices.map(pt => 
+                                                    `${pt.xPct * canvasSize.width},${pt.yPct * canvasSize.height}`
+                                                ).join(" ");
+                                                
+                                                let fillColor = "rgba(41, 128, 185, 0.15)";
+                                                let strokeColor = "#2980b9";
+                                                if (poly.label === "Wall Thickness") {
+                                                    fillColor = "rgba(192, 57, 43, 0.15)";
+                                                    strokeColor = "#c0392b";
+                                                } else if (poly.label === "Slab") {
+                                                    fillColor = "rgba(39, 174, 96, 0.15)";
+                                                    strokeColor = "#27ae60";
+                                                } else if (poly.label === "Column") {
+                                                    fillColor = "rgba(211, 84, 0, 0.2)";
+                                                    strokeColor = "#d35400";
+                                                }
+
+                                                let cx = poly.centroid.xPct * canvasSize.width;
+                                                let cy = poly.centroid.yPct * canvasSize.height;
+
+                                                if (poly.label !== "Wall Thickness") {
+                                                    let overlap = true;
+                                                    let attempts = 0;
+                                                    let dx = 0;
+                                                    let dy = 0;
+                                                    while (overlap && attempts < 20) {
+                                                        overlap = false;
+                                                        for (const pos of labelPositions) {
+                                                            if (Math.abs(cx + dx - pos.x) < 210 && Math.abs(cy + dy - pos.y) < 45) {
+                                                                overlap = true;
+                                                                break;
+                                                            }
+                                                        }
+                                                        if (overlap) {
+                                                            attempts++;
+                                                            const step = Math.floor(attempts / 4) + 1;
+                                                            const dir = attempts % 4;
+                                                            if (dir === 0) { dx = 0; dy = -45 * step; }
+                                                            else if (dir === 1) { dx = 210 * step; dy = 0; }
+                                                            else if (dir === 2) { dx = 0; dy = 45 * step; }
+                                                            else if (dir === 3) { dx = -210 * step; dy = 0; }
+                                                        }
+                                                    }
+                                                    cx += dx;
+                                                    cy += dy;
+                                                    labelPositions.push({ x: cx, y: cy });
+                                                }
+                                                
+                                                let labelText = `ROOM ${idx + 1}`;
+                                                if (poly.text_inside && poly.text_inside.length > 0 && typeof poly.text_inside[0] === 'string' && poly.text_inside[0].trim() !== '') {
+                                                    labelText = poly.text_inside[0];
+                                                } else if (poly.label && typeof poly.label === 'string' && poly.label.trim() !== '' && poly.label !== "Wall Thickness") {
+                                                    labelText = `${poly.label} ${idx + 1}`;
+                                                }
+
+                                                return (
+                                                    <Box
+                                                        key={`poly-${idx}`}
+                                                        component="svg"
+                                                        sx={{
+                                                            position: 'absolute',
+                                                            top: 0,
+                                                            left: 0,
+                                                            width: '100%',
+                                                            height: '100%',
+                                                            zIndex: 14,
+                                                            pointerEvents: 'none'
+                                                        }}
+                                                    >
+                                                        <polygon
+                                                            points={pointsStr}
+                                                            fill={fillColor}
+                                                            stroke={strokeColor}
+                                                            strokeWidth="1.5"
+                                                        />
+                                                        
+                                                        {poly.label !== "Wall Thickness" && (
+                                                            <foreignObject
+                                                                x={cx - 105}
+                                                                y={cy - 18}
+                                                                width="210"
+                                                                height="36"
+                                                                style={{ pointerEvents: 'none', overflow: 'visible' }}
+                                                            >
+                                                                <div style={{
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                gap: '8px',
+                                                                padding: '6px 12px',
+                                                                background: 'rgba(15, 23, 42, 0.85)',
+                                                                backdropFilter: 'blur(12px)',
+                                                                WebkitBackdropFilter: 'blur(12px)',
+                                                                border: `1px solid rgba(255, 255, 255, 0.15)`,
+                                                                borderLeft: `4px solid ${strokeColor}`,
+                                                                borderRadius: '6px',
+                                                                boxShadow: '0 6px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
+                                                                color: '#fff',
+                                                                fontFamily: "'Inter', 'Roboto', sans-serif",
+                                                                letterSpacing: '0.5px'
+                                                            }}>
+                                                                <div style={{
+                                                                    fontSize: '11px',
+                                                                    fontWeight: '700',
+                                                                    textTransform: 'uppercase',
+                                                                    color: 'rgba(255,255,255,0.95)',
+                                                                    whiteSpace: 'nowrap'
+                                                                }}>
+                                                                    {labelText}
+                                                                </div>
+
+                                                                {poly.width_m !== undefined && poly.height_m !== undefined && (
+                                                                    <>
+                                                                        <div style={{
+                                                                            width: '1px',
+                                                                            height: '12px',
+                                                                            background: 'rgba(255,255,255,0.2)'
+                                                                        }} />
+                                                                        <div style={{
+                                                                            fontSize: '10px',
+                                                                            fontWeight: '500',
+                                                                            color: 'rgba(255,255,255,0.7)',
+                                                                            whiteSpace: 'nowrap'
+                                                                        }}>
+                                                                            {poly.width_m}m × {poly.height_m}m
+                                                                        </div>
+                                                                    </>
+                                                                )}
+                                                                
+                                                                <div style={{
+                                                                    width: '1px',
+                                                                    height: '12px',
+                                                                    background: 'rgba(255,255,255,0.2)'
+                                                                }} />
+                                                                <div style={{
+                                                                    fontSize: '11px',
+                                                                    fontWeight: '700',
+                                                                    color: '#4ade80',
+                                                                    whiteSpace: 'nowrap'
+                                                                }}>
+                                                                    {poly.area_sqm}<span style={{ fontSize: '9px', opacity: 0.8, marginLeft: '2px' }}>m²</span>
+                                                                </div>
+                                                            </div>
+                                                        </foreignObject>
+                                                    )}
+                                                </Box>
+                                            );
+                                            });
+                                        })()}
 
                                         {/* Render AI Detected Objects segments/polygons or boxes */}
                                         {isModelEstimator && results?.detected_objects?.map((obj, idx) => {
@@ -799,14 +955,14 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                     >
                                                         <polygon
                                                             points={pointsStr}
-                                                            fill="rgba(59, 130, 246, 0.25)"
-                                                            stroke="#3b82f6"
-                                                            strokeWidth="2"
+                                                            fill="rgba(142, 68, 173, 0.15)"
+                                                            stroke="#8e44ad"
+                                                            strokeWidth="1.5"
                                                         />
                                                         <text
                                                             x={obj.polygon[0][0] * canvasSize.width}
                                                             y={obj.polygon[0][1] * canvasSize.height - 5}
-                                                            fill="#00e676"
+                                                            fill="#2ecc71"
                                                             fontSize="10px"
                                                             fontFamily="'JetBrains Mono', monospace"
                                                             fontWeight="bold"
@@ -827,8 +983,8 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                             top: y1 * canvasSize.height,
                                                             width: (x2 - x1) * canvasSize.width,
                                                             height: (y2 - y1) * canvasSize.height,
-                                                            border: '2px solid #3b82f6',
-                                                            bgcolor: 'rgba(59, 130, 246, 0.15)',
+                                                            border: '1.5px solid #8e44ad',
+                                                            bgcolor: 'rgba(142, 68, 173, 0.1)',
                                                             zIndex: 15,
                                                             pointerEvents: 'none'
                                                         }}
@@ -839,7 +995,7 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                                 position: 'absolute',
                                                                 top: -16,
                                                                 left: 0,
-                                                                color: '#00e676',
+                                                                color: '#2ecc71',
                                                                 fontFamily: "'JetBrains Mono', monospace",
                                                                 fontWeight: 'bold',
                                                                 fontSize: '9px',
@@ -1073,8 +1229,16 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                             </TableRow>
 
                                             <TableRow hover>
-                                                <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)' }}>Block Work Volume</TableCell>
+                                                <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)' }}>Gross Volume (Net + Waste)</TableCell>
                                                 <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold', borderBottomColor: 'rgba(255,255,255,0.05)' }}>{blockWorkVolume} m³</TableCell>
+                                            </TableRow>
+                                            <TableRow hover>
+                                                <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)' }}>Net Volume (Centerline)</TableCell>
+                                                <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold', borderBottomColor: 'rgba(255,255,255,0.05)' }}>{netVolume} m³</TableCell>
+                                            </TableRow>
+                                            <TableRow hover>
+                                                <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)' }}>Standard Block Count</TableCell>
+                                                <TableCell align="right" sx={{ color: '#3498db', fontWeight: 'bold', borderBottomColor: 'rgba(255,255,255,0.05)' }}>{blockCount} blocks</TableCell>
                                             </TableRow>
                                             <TableRow hover>
                                                 <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)' }}>Plastering</TableCell>
@@ -1096,6 +1260,33 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                     </TableRow>
                                                 </>
                                             )}
+                                            {!isModelEstimator && results?.polygons && results.polygons.length > 0 && (
+                                                <>
+                                                    <TableRow>
+                                                        <TableCell colSpan={2} sx={{ color: '#3b82f6', fontWeight: 'bold', fontFamily: "'JetBrains Mono', monospace", borderBottomColor: 'rgba(255,255,255,0.08)', pt: 2, fontSize: '12px' }}>
+                                                            DETECTED ROOMS / SPACES (COMPUTATIONAL GEOMETRY)
+                                                        </TableCell>
+                                                    </TableRow>
+                                                    {results.polygons.map((poly, idx) => (
+                                                        <TableRow key={`poly-summary-${idx}`} hover>
+                                                            <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)', fontSize: '12px', pl: 2 }}>
+                                                                <span style={{
+                                                                    display: 'inline-block',
+                                                                    width: 8,
+                                                                    height: 8,
+                                                                    borderRadius: '50%',
+                                                                    backgroundColor: poly.label === 'Wall Thickness' ? '#ef4444' : poly.label === 'Slab' ? '#10b981' : poly.label === 'Column' ? '#f59e0b' : '#3b82f6',
+                                                                    marginRight: 6
+                                                                }}></span>
+                                                                {poly.label} {poly.text_inside.length > 0 ? `("${poly.text_inside[0]}")` : `#${idx + 1}`}
+                                                            </TableCell>
+                                                            <TableCell align="right" sx={{ color: '#00e676', fontWeight: 'bold', borderBottomColor: 'rgba(255,255,255,0.05)', fontSize: '12px' }}>
+                                                                {poly.area_sqm} m²
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </>
+                                            )}
                                             {isModelEstimator && results?.object_summaries && results.object_summaries.length > 0 && (
                                                 <>
                                                     <TableRow>
@@ -1108,7 +1299,7 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                         const name = nameParts.join(" ");
                                                         return (
                                                             <TableRow key={`summary-obj-${idx}`} hover>
-                                                                <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)', fontSize: '12px', pl: 2 }}>
+                                                                 <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)', fontSize: '12px', pl: 2 }}>
                                                                     {name}
                                                                 </TableCell>
                                                                 <TableCell align="right" sx={{ color: '#00e676', fontWeight: 'bold', borderBottomColor: 'rgba(255,255,255,0.05)', fontSize: '12px' }}>
