@@ -172,6 +172,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .unwrap();
 
+    // 4.5 Start Python backend server in the background
+    std::thread::spawn(|| {
+        let mut path = std::env::current_dir().unwrap_or_default();
+        let mut found = false;
+        for _ in 0..5 {
+            let candidate = path.join("main.py");
+            if candidate.exists() {
+                path = candidate;
+                found = true;
+                break;
+            }
+            if let Some(parent) = path.parent() {
+                path = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+        if found {
+            let app_dir = path.parent().unwrap().to_str().unwrap().to_string();
+            println!("Found python backend at {:?}", path);
+            
+            // Clean up any old process using port 8000
+            if cfg!(target_os = "windows") {
+                let _ = std::process::Command::new("powershell")
+                    .args(&[
+                        "-Command",
+                        "Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }",
+                    ])
+                    .output();
+            }
+
+            // Try spawning with "py" first
+            let mut cmd = std::process::Command::new("py");
+            cmd.args(&["-m", "uvicorn", "main:app", "--app-dir", &app_dir, "--port", "8000"]);
+            if cmd.spawn().is_err() {
+                // Fallback to "python"
+                let mut cmd_fallback = std::process::Command::new("python");
+                cmd_fallback.args(&["-m", "uvicorn", "main:app", "--app-dir", &app_dir, "--port", "8000"]);
+                if let Err(e) = cmd_fallback.spawn() {
+                    eprintln!("Failed to start python backend: {:?}", e);
+                } else {
+                    println!("Python backend started successfully via python");
+                }
+            } else {
+                println!("Python backend started successfully via py");
+            }
+        } else {
+            eprintln!("Could not locate main.py to start the Python backend.");
+        }
+    });
+
     // 5. Spawn Axum Server in Background Tokio Runtime
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();

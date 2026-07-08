@@ -10,6 +10,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/Upload';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import FolderSpecialIcon from '@mui/icons-material/FolderSpecial';
+import AddIcon from '@mui/icons-material/Add';
 
 import { useAuth } from "../context/AuthContext";
 
@@ -29,6 +30,30 @@ export default function ProjectArchive({ onOpenProject }) {
     };
 
     useEffect(() => { loadData(); }, []);
+
+    const handleCreateProject = async () => {
+        const newProject = {
+            name: "New Project",
+            code: `PROJ-${Math.floor(1000 + Math.random() * 9000)}`,
+            clientName: "",
+            region: "",
+            status: "Draft",
+            assignedStaff: JSON.stringify([currentUser?.id]),
+            createdAt: Date.now()
+        };
+
+        try {
+            const res = await window.api.db.addProject(newProject);
+            if (res && res.success !== false) {
+                loadData();
+            } else {
+                alert("Failed to create project: " + (res?.error || "Unknown error"));
+            }
+        } catch (err) {
+            console.error("Database Bridge Error:", err);
+            alert("Error creating project.");
+        }
+    };
 
     const visibleProjects = useMemo(() => {
         if (hasClearance(4)) return projects;
@@ -94,7 +119,15 @@ export default function ProjectArchive({ onOpenProject }) {
                         <FolderSpecialIcon color="primary" sx={{ fontSize: 32 }} />
                         <Typography variant="h4" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px' }}>PROJECT_ARCHIVE</Typography>
                     </Box>
-                    {/* 🔥 Action buttons removed as Backup/Restore tab handles global operations */}
+                    <Button 
+                        variant="contained" 
+                        color="primary" 
+                        startIcon={<AddIcon />}
+                        onClick={handleCreateProject}
+                        sx={{ fontFamily: "'JetBrains Mono', monospace", borderRadius: 2 }}
+                    >
+                        Create Project
+                    </Button>
                 </Box>
 
                 {/* SEARCH */}

@@ -36,7 +36,17 @@ export default function CreateBoqTab({ regions, resources, masterBoqs, loadData,
             const components = Array.isArray(editingBoq.components) ? editingBoq.components :
                 (typeof editingBoq.components === 'string' ? JSON.parse(editingBoq.components || '[]') : []);
 
-            setBoqRows(components.map(c => ({
+            // Filter out the auto-created self-reference resource if it's the only component
+            let finalComponents = components;
+            if (components.length === 1) {
+                const singleComp = components[0];
+                const resource = resources.find(r => r.id === singleComp.itemId);
+                if (resource && resource.code === editingBoq.itemCode) {
+                    finalComponents = [];
+                }
+            }
+
+            setBoqRows(finalComponents.map(c => ({
                 id: crypto.randomUUID(),
                 itemType: c.itemType || 'resource',
                 itemId: c.itemId,
@@ -94,6 +104,16 @@ export default function CreateBoqTab({ regions, resources, masterBoqs, loadData,
 
     const saveMasterBoq = async (isSaveAsNew = false) => {
         if (!boqCode || !boqDesc) return alert("Please enter a Code and Description.");
+
+        if (isSaveAsNew) {
+            const codeExists = (masterBoqs || []).some(b => 
+                String(b.itemCode).trim().toLowerCase() === String(boqCode).trim().toLowerCase()
+            );
+            if (codeExists) {
+                return alert(`Error: The Item Code "${boqCode}" is already in use. Please enter a unique Item Code.`);
+            }
+        }
+
         const validComponents = renderedRows.filter(r => r.itemId && r.computedQty !== 0).map(r => ({ itemType: r.itemType, itemId: r.itemId, qty: Number(r.computedQty), formulaStr: r.formulaStr || String(r.computedQty) }));
         if (validComponents.length === 0) return alert("Add at least one valid component.");
         const payload = { itemCode: boqCode, description: boqDesc, unit: boqUnit, overhead: Number(boqOH), profit: Number(boqProfit), components: JSON.stringify(validComponents) };

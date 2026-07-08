@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
     Box, Button, Typography, Paper, Grid, IconButton, Dialog, DialogTitle,
-    DialogContent, DialogActions, Chip, alpha, useTheme, TextField
+    DialogContent, DialogActions, Chip, alpha, useTheme, TextField, MenuItem
 } from "@mui/material";
 import TimelineIcon from '@mui/icons-material/Timeline';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
@@ -35,6 +35,18 @@ export default function BrandPriceChartModal({ open, onClose, resource, regions,
         }
     }, [open, resource]);
 
+    const [currentYear, currentMonth] = brandChartMonthYear ? brandChartMonthYear.split('-') : getCurrentMonthKey().split('-');
+
+    const handleMonthChange = (e) => {
+        const newMonth = e.target.value;
+        setBrandChartMonthYear(`${currentYear}-${newMonth}`);
+    };
+
+    const handleYearChange = (e) => {
+        const newYear = e.target.value;
+        setBrandChartMonthYear(`${newYear}-${currentMonth}`);
+    };
+
     if (!resource) return null;
 
     const history = resource.rates?.brandRatesHistory || {};
@@ -60,6 +72,20 @@ export default function BrandPriceChartModal({ open, onClose, resource, regions,
 
     // All historical months for this resource (for the dropdown)
     const availableMonths = Object.keys(history).sort().reverse();
+    
+    // Extract unique years from history keys
+    const yearsFromHistory = availableMonths.map(m => m.split('-')[0]);
+    const currentYearNum = new Date().getFullYear();
+    const startYear = 2026;
+    
+    // Generate years from the current system year down to the baseline year 2026
+    const generatedYears = [];
+    for (let y = currentYearNum; y >= startYear; y--) {
+        generatedYears.push(String(y));
+    }
+    
+    const allYearsSet = new Set([...yearsFromHistory, ...generatedYears]);
+    const availableYears = Array.from(allYearsSet).sort().reverse();
 
     const CustomTooltip = ({ active, payload, label }) => {
         if (!active || !payload?.length) return null;
@@ -152,37 +178,132 @@ export default function BrandPriceChartModal({ open, onClose, resource, regions,
                         </Typography>
                     </Box>
 
-                    {/* SELECTOR FOR MONTH */}
+                    {/* SELECTOR FOR MONTH AND YEAR */}
                     <Box display="flex" gap={1.5} alignItems="center">
-                        <Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
+                        <Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'rgba(255,255,255,0.5)', mr: 0.5 }}>
                             Active Period:
                         </Typography>
                         <TextField
                             select
                             size="small"
-                            value={brandChartMonthYear}
-                            onChange={(e) => setBrandChartMonthYear(e.target.value)}
-                            SelectProps={{ native: true }}
-                            InputProps={{
-                                sx: {
-                                    fontFamily: "'JetBrains Mono', monospace",
-                                    fontSize: '12px',
-                                    color: '#fff',
-                                    bgcolor: 'rgba(255,255,255,0.03)',
-                                    borderColor: 'rgba(255,255,255,0.1)',
-                                    '& select': { py: 0.8, px: 2 }
+                            value={currentMonth}
+                            onChange={handleMonthChange}
+                            SelectProps={{
+                                native: false,
+                                MenuProps: {
+                                    PaperProps: {
+                                        sx: {
+                                            bgcolor: '#283a54',
+                                            border: '1px solid rgba(255,255,255,0.08)',
+                                            color: '#fff',
+                                            boxShadow: '0 8px 16px rgba(0,0,0,0.3)',
+                                            '& .MuiMenuItem-root': {
+                                                fontSize: '12px',
+                                                fontFamily: "'JetBrains Mono', monospace",
+                                                color: 'rgba(255,255,255,0.9)',
+                                                py: 1,
+                                                px: 2,
+                                                '&:hover': {
+                                                    bgcolor: '#334a6c'
+                                                },
+                                                '&.Mui-selected': {
+                                                    bgcolor: '#334a6c',
+                                                    fontWeight: 'bold',
+                                                    color: '#00e5ff',
+                                                    '&:hover': {
+                                                        bgcolor: '#3d5980'
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }}
+                            slotProps={{
+                                input: {
+                                    sx: {
+                                        fontFamily: "'JetBrains Mono', monospace",
+                                        fontSize: '12px',
+                                        color: '#fff',
+                                        bgcolor: 'rgba(255,255,255,0.03)',
+                                        '& .MuiOutlinedInput-notchedOutline': {
+                                            borderColor: 'rgba(255,255,255,0.1)'
+                                        },
+                                        '&:hover .MuiOutlinedInput-notchedOutline': {
+                                            borderColor: '#00e5ff'
+                                        },
+                                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                                            borderColor: '#00e5ff'
+                                        }
+                                    }
                                 }
                             }}
                         >
-                            {availableMonths.length === 0 ? (
-                                <option value={getCurrentMonthKey()}>{getCurrentMonthKey()}</option>
-                            ) : (
-                                availableMonths.map(m => {
-                                    const [y, mm] = m.split('-');
-                                    const mName = MonthNames[Number(mm) - 1] || mm;
-                                    return <option key={m} value={m}>{mName} {y}</option>;
-                                })
-                            )}
+                            {MonthNames.map((name, index) => {
+                                const val = String(index + 1).padStart(2, '0');
+                                return <MenuItem key={val} value={val}>{name}</MenuItem>;
+                            })}
+                        </TextField>
+
+                        <TextField
+                            select
+                            size="small"
+                            value={currentYear}
+                            onChange={handleYearChange}
+                            SelectProps={{
+                                native: false,
+                                MenuProps: {
+                                    PaperProps: {
+                                        sx: {
+                                            bgcolor: '#283a54',
+                                            border: '1px solid rgba(255,255,255,0.08)',
+                                            color: '#fff',
+                                            boxShadow: '0 8px 16px rgba(0,0,0,0.3)',
+                                            '& .MuiMenuItem-root': {
+                                                fontSize: '12px',
+                                                fontFamily: "'JetBrains Mono', monospace",
+                                                color: 'rgba(255,255,255,0.9)',
+                                                py: 1,
+                                                px: 2,
+                                                '&:hover': {
+                                                    bgcolor: '#334a6c'
+                                                },
+                                                '&.Mui-selected': {
+                                                    bgcolor: '#334a6c',
+                                                    fontWeight: 'bold',
+                                                    color: '#00e5ff',
+                                                    '&:hover': {
+                                                        bgcolor: '#3d5980'
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }}
+                            slotProps={{
+                                input: {
+                                    sx: {
+                                        fontFamily: "'JetBrains Mono', monospace",
+                                        fontSize: '12px',
+                                        color: '#fff',
+                                        bgcolor: 'rgba(255,255,255,0.03)',
+                                        '& .MuiOutlinedInput-notchedOutline': {
+                                            borderColor: 'rgba(255,255,255,0.1)'
+                                        },
+                                        '&:hover .MuiOutlinedInput-notchedOutline': {
+                                            borderColor: '#00e5ff'
+                                        },
+                                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                                            borderColor: '#00e5ff'
+                                        }
+                                    }
+                                }
+                            }}
+                        >
+                            {availableYears.map(year => (
+                                <MenuItem key={year} value={year}>{year}</MenuItem>
+                            ))}
                         </TextField>
                     </Box>
                 </Box>
@@ -194,7 +315,7 @@ export default function BrandPriceChartModal({ open, onClose, resource, regions,
                     }}>
                         <Box sx={{ fontSize: 40, mb: 1 }}>📊</Box>
                         <Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', color: 'rgba(255,255,255,0.4)' }}>
-                            No brand rates recorded for the selected period ({brandChartMonthYear}).
+                            No brand rates recorded for the selected period ({MonthNames[Number(currentMonth) - 1] || currentMonth} {currentYear}).
                         </Typography>
                         <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.25)', display: 'block', mt: 1 }}>
                             Register brand rates in the Brand Rates Editor first.

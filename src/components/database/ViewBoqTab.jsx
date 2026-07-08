@@ -1,11 +1,15 @@
 import { useState, useMemo, useRef } from "react";
-import { Box, Button, Typography, Paper, TextField, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, TableSortLabel, InputAdornment, Pagination } from "@mui/material";
+import { Box, Button, Typography, Paper, TextField, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, TableSortLabel, InputAdornment, Pagination, IconButton } from "@mui/material";
 import SearchIcon from '@mui/icons-material/Search';
 import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/Upload';
+import DeleteIcon from '@mui/icons-material/Delete';
 import * as XLSX from "xlsx";
+import AddCategoryModal from "./AddCategoryModal";
+import ConfirmDeleteCategoryModal from "./ConfirmDeleteCategoryModal";
+import AddDatabookEntryModal from "./AddDatabookEntryModal";
 
-const CATEGORIES = [
+const STATIC_CATEGORIES = [
     "2. Earth Work",
     "3. Mortars",
     "4. Concrete work",
@@ -83,18 +87,18 @@ const parsePDFText = (text) => {
             if (currentItem) {
                 items.push(currentItem);
             }
-            
+
             let restText = matchStart[3] ? matchStart[3].trim() : "";
             let rate = 0;
             let unit = "each";
-            
+
             const matchEnd = restText.match(/^(.*?)\s+([\d,]+(?:\.\d+)?)\s+(\S+)$/);
             if (matchEnd) {
                 restText = matchEnd[1].trim();
                 rate = Number(matchEnd[2].replace(/,/g, ''));
                 unit = matchEnd[3].trim();
             }
-            
+
             currentItem = {
                 code: matchStart[2],
                 lines: restText ? [restText] : [],
@@ -132,10 +136,44 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
     const [searchCode, setSearchCode] = useState('');
     const [searchDesc, setSearchDesc] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('');
+    const [categories, setCategories] = useState(() => {
+        const saved = localStorage.getItem("custom_categories");
+        const parsed = saved ? JSON.parse(saved) : [];
+        return [...STATIC_CATEGORIES, ...parsed];
+    });
+    const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+    const [categoryToDelete, setCategoryToDelete] = useState(null);
+    const [deleteCategoryModalOpen, setDeleteCategoryModalOpen] = useState(false);
+    const [addEntryModalOpen, setAddEntryModalOpen] = useState(false);
     const [sortDirection, setSortDirection] = useState('asc');
     const [page, setPage] = useState(0);
     const [rowsPerPage, setRowsPerPage] = useState(10);
     const excelInputRef = useRef(null);
+
+    const handleAddCategory = (newCat) => {
+        const saved = localStorage.getItem("custom_categories");
+        const parsed = saved ? JSON.parse(saved) : [];
+        const updated = [...parsed, newCat];
+        localStorage.setItem("custom_categories", JSON.stringify(updated));
+        setCategories([...STATIC_CATEGORIES, ...updated]);
+        setSelectedCategory(newCat);
+        setPage(0);
+    };
+
+    const handleDeleteCategory = () => {
+        if (!categoryToDelete) return;
+        const saved = localStorage.getItem("custom_categories");
+        const parsed = saved ? JSON.parse(saved) : [];
+        const updated = parsed.filter(cat => cat !== categoryToDelete);
+        localStorage.setItem("custom_categories", JSON.stringify(updated));
+        setCategories([...STATIC_CATEGORIES, ...updated]);
+        if (selectedCategory === categoryToDelete) {
+            setSelectedCategory('');
+            setPage(0);
+        }
+        setCategoryToDelete(null);
+        setDeleteCategoryModalOpen(false);
+    };
 
     const [colWidths, setColWidths] = useState({ code: 150, desc: 550, unit: 100, actions: 150 });
 
@@ -155,17 +193,17 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
         let filtered = masterBoqs.filter((boq) => {
             const matchCode = boq.itemCode?.toLowerCase().includes(searchCode.toLowerCase());
             const matchDesc = boq.description?.toLowerCase().includes(searchDesc.toLowerCase());
-            
+
             let matchCat = true;
             if (selectedCategory) {
-                const match = selectedCategory.match(/^(\d+)\./);
+                const match = selectedCategory.match(/^([\d.]+)\./);
                 if (match) {
                     const sectionNum = match[1];
                     const normalizedCode = (boq.itemCode || '').trim();
-                    matchCat = normalizedCode.startsWith(`${sectionNum}.`) || 
-                               normalizedCode === sectionNum ||
-                               normalizedCode.startsWith(`0${sectionNum}.`) ||
-                               normalizedCode === `0${sectionNum}`;
+                    matchCat = normalizedCode.startsWith(`${sectionNum}.`) ||
+                        normalizedCode === sectionNum ||
+                        normalizedCode.startsWith(`0${sectionNum}.`) ||
+                        normalizedCode === `0${sectionNum}`;
                 }
             }
             return matchCode && matchDesc && matchCat;
@@ -246,12 +284,12 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                 const pdfjsLib = await loadPdfJs();
                 const arrayBuffer = event.target.result;
                 const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-                
+
                 let fullText = "";
                 for (let i = 1; i <= pdf.numPages; i++) {
                     const page = await pdf.getPage(i);
                     const textContent = await page.getTextContent();
-                    
+
                     const linesMap = {};
                     textContent.items.forEach(item => {
                         if (!item.str.trim()) return;
@@ -275,12 +313,12 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
 
                 // Check for required format columns
                 const lowerText = fullText.toLowerCase();
-                const hasRequiredHeaders = (lowerText.includes("no") || lowerText.includes("sl")) && 
-                                           (lowerText.includes("spec") || lowerText.includes("code")) && 
-                                           lowerText.includes("specification") && 
-                                           (lowerText.includes("rate") || lowerText.includes("price")) && 
-                                           (lowerText.includes("unit") || lowerText.includes("unlt"));
-                                           
+                const hasRequiredHeaders = (lowerText.includes("no") || lowerText.includes("sl")) &&
+                    (lowerText.includes("spec") || lowerText.includes("code")) &&
+                    lowerText.includes("specification") &&
+                    (lowerText.includes("rate") || lowerText.includes("price")) &&
+                    (lowerText.includes("unit") || lowerText.includes("unlt"));
+
                 if (!hasRequiredHeaders) {
                     alert("Invalid format! The PDF must contain 'No', 'Spec Code', 'Specification', 'Rate(₹)', and 'Unit' columns.");
                     return;
@@ -367,30 +405,97 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
             <Box display="flex" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
                 <TextField placeholder="Search Code..." variant="outlined" size="small" value={searchCode} onChange={(e) => { setSearchCode(e.target.value); setPage(0); }} sx={{ flex: 1, minWidth: 150 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
                 <TextField placeholder="Search Description..." variant="outlined" size="small" value={searchDesc} onChange={(e) => { setSearchDesc(e.target.value); setPage(0); }} sx={{ flex: 2, minWidth: 250 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                
                 <TextField
                     select
                     size="small"
                     label="CATEGORY"
                     value={selectedCategory}
-                    onChange={(e) => { setSelectedCategory(e.target.value); setPage(0); }}
+                    onChange={(e) => { 
+                        if (e.target.value === "__ADD_CATEGORY__") {
+                            setCategoryModalOpen(true);
+                        } else {
+                            setSelectedCategory(e.target.value); 
+                            setPage(0); 
+                        }
+                    }}
                     sx={{ flex: 1.5, minWidth: 200 }}
                     InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }}
                     InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}
+                    SelectProps={{
+                        renderValue: (selected) => selected || "---select---"
+                    }}
                 >
                     <MenuItem value="" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>---select---</MenuItem>
-                    {CATEGORIES.map(cat => (
-                        <MenuItem key={cat} value={cat} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{cat}</MenuItem>
-                    ))}
+                    <MenuItem value="__ADD_CATEGORY__" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: '#8b5cf6', fontWeight: 'bold' }}>+ Add Category</MenuItem>
+                    {categories.map(cat => {
+                        const isCustom = !STATIC_CATEGORIES.includes(cat);
+                        return (
+                            <MenuItem 
+                                key={cat} 
+                                value={cat} 
+                                sx={{ 
+                                    fontFamily: "'JetBrains Mono', monospace", 
+                                    fontSize: '12px',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    width: '100%',
+                                    minWidth: '240px'
+                                }}
+                            >
+                                <span>{cat}</span>
+                                {isCustom && (
+                                    <IconButton
+                                        size="small"
+                                        color="error"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setCategoryToDelete(cat);
+                                            setDeleteCategoryModalOpen(true);
+                                        }}
+                                        sx={{ p: 0.5, ml: 2 }}
+                                    >
+                                        <DeleteIcon sx={{ fontSize: 16 }} />
+                                    </IconButton>
+                                )}
+                            </MenuItem>
+                        );
+                    })}
                 </TextField>
 
-                <Box display="flex" gap={2} alignItems="center">
+                <Box display="flex" gap={2} alignItems="center" flexWrap="wrap" sx={{ ml: 'auto' }}>
                     <Button size="small" variant="contained" color="secondary" disableElevation startIcon={<UploadIcon />} onClick={() => { if (!selectedCategory) { alert("Please select a category first!"); return; } pdfInputRef.current.click(); }} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)', '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' } }}>UPLOAD ASSEMBLY</Button>
 
                     <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={generateDatabookTemplate} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>TEMPLATE</Button>
                     <input type="file" accept=".xls,.xlsx" ref={excelInputRef} style={{ display: 'none' }} onChange={(e) => { handleDatabookExcelUpload(e); excelInputRef.current.value = null; }} />
                     <input type="file" accept=".pdf" ref={pdfInputRef} style={{ display: 'none' }} onChange={(e) => { handlePdfUpload(e); pdfInputRef.current.value = null; }} />
                     <Button size="small" variant="contained" disableElevation startIcon={<UploadIcon />} onClick={() => excelInputRef.current.click()} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>IMPORT EXCEL</Button>
+
+                    <Button
+                        size="small"
+                        variant="contained"
+                        onClick={() => {
+                            if (!selectedCategory) {
+                                alert("Please select a category first!");
+                                return;
+                            }
+                            setAddEntryModalOpen(true);
+                        }}
+                        sx={{
+                            height: 40,
+                            px: 3,
+                            borderRadius: 2,
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontSize: '11px',
+                            background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)',
+                            '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' }
+                        }}
+                    >
+                        + ADD DATABOOK ENTRY
+                    </Button>
                 </Box>
+
             </Box>
 
             <TableContainer component={Paper} elevation={0} variant="outlined" sx={{ overflowX: 'auto', width: '100%', borderRadius: '8px 8px 0 0', border: '1px solid', borderColor: 'divider', borderBottom: 'none', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
@@ -411,7 +516,7 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                                         <TableCell sx={{ fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{b.itemCode || '-'}</TableCell>
                                         <TableCell sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{b.description}</TableCell>
                                         <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{b.unit}</TableCell>
-                                        <TableCell align="center"><Box display="flex" gap={1} justifyContent="center"><Button size="small" variant="outlined" color="warning" onClick={() => onEditBoq(b)} sx={{ borderRadius: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>EDIT</Button><Button size="small" variant="outlined" color="error" onClick={() => deleteMasterBoq(b.id)} sx={{ borderRadius: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>DELETE</Button></Box></TableCell>
+                                        <TableCell align="center"><Box display="flex" gap={1} justifyContent="center"><Button size="small" variant="outlined" color="warning" onClick={() => onEditBoq(b)} sx={{ borderRadius: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>EDIT</Button><Button size="small" variant="outlined" color="error" onClick={() => deleteMasterBoq(b.id, `${b.itemCode} - ${b.description}`)} sx={{ borderRadius: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>DELETE</Button></Box></TableCell>
                                     </TableRow>
                                 );
                             })
@@ -459,6 +564,29 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                     }}
                 />
             </Box>
+
+            <AddCategoryModal
+                open={categoryModalOpen}
+                onClose={() => setCategoryModalOpen(false)}
+                onAddCategory={handleAddCategory}
+                existingCategories={categories}
+            />
+
+            <ConfirmDeleteCategoryModal
+                open={deleteCategoryModalOpen}
+                onClose={() => { setCategoryToDelete(null); setDeleteCategoryModalOpen(false); }}
+                onConfirm={handleDeleteCategory}
+                categoryName={categoryToDelete}
+            />
+
+            <AddDatabookEntryModal
+                open={addEntryModalOpen}
+                onClose={() => setAddEntryModalOpen(false)}
+                onSave={loadData}
+                categoryPrefix={selectedCategory}
+                masterBoqs={masterBoqs}
+                regions={regions}
+            />
         </Box>
     );
 }

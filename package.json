@@ -7,7 +7,7 @@
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently --kill-others \"vite\" \"py -m uvicorn main:app --app-dir .. --port 8000\"",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",

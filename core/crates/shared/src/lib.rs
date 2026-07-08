@@ -90,7 +90,6 @@ pub struct Project {
     pub assigned_staff: Option<String>,
 }
 
-// 🔥 2. FULLY EXPANDED STAFF TABLE
 #[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct Staff {
     pub id: String,
@@ -111,7 +110,6 @@ pub struct Staff {
     pub access_level: Option<i32>,
 }
 
-// 🔥 3. CHAT MESSAGES
 #[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct Message {
     pub id: String,
@@ -130,7 +128,6 @@ pub struct Message {
     pub created_at: Option<i64>,
 }
 
-// 🔥 4. PRIVATE DIRECT MESSAGES
 #[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct PrivateMessage {
     pub id: String,
@@ -149,7 +146,6 @@ pub struct PrivateMessage {
     pub created_at: Option<i64>,
 }
 
-// 🔥 5. PROJECT DOCUMENTS
 #[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct ProjectDocument {
     pub id: String,
@@ -169,7 +165,6 @@ pub struct ProjectDocument {
     pub added_at: Option<i64>,
 }
 
-// 🔥 6. PROJECT BOQ
 #[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct ProjectBoq {
     pub id: String,

@@ -21,11 +21,12 @@ import InventoryTab from "./workspace/InventoryTab";
 import DocumentsTab from "./workspace/DocumentsTab";
 import SiteGalleryTab from "./workspace/SiteGalleryTab";
 import ChatModule from "./workspace/ChatModule";
+import VectorPlanEstimator from "./workspace/VectorPlanEstimator";
 
 import {
     Box, Typography, Button, Paper, Dialog, DialogTitle, DialogContent,
     DialogActions, FormControlLabel, Checkbox, IconButton, Tooltip,
-    List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divider, Chip
+    List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divider, Chip, Grid
 } from "@mui/material";
 
 // Workspace Navigation Icons
@@ -74,7 +75,8 @@ const RAW_CATEGORIES = {
             { id: "kanban", label: "Task Board", minClearance: 2, icon: <ViewKanbanOutlinedIcon /> },
             { id: "gallery", label: "Site Photo Gallery", minClearance: 2, icon: <PhotoLibraryOutlinedIcon /> },
             { id: "daily_log", label: "Daily Log", minClearance: 2, icon: <MenuBookOutlinedIcon /> },
-            { id: "mbook", label: "Measurement Book", minClearance: 2, icon: <SquareFootOutlinedIcon /> }
+            { id: "mbook", label: "Measurement Book", minClearance: 2, icon: <SquareFootOutlinedIcon /> },
+            { id: "pdf_estimator", label: "PDF Qty Estimator", minClearance: 2, icon: <PictureAsPdfIcon /> }
         ]
     },
     supply_chain: {
@@ -299,12 +301,13 @@ export default function ProjectWorkspace({ projectId, onBack }) {
                 {activeTab === "schedule" && (<GanttScheduleTab projectId={projectId} />)}
                 {activeTab === "subcontractors" && (<SubcontractorBidTab projectId={projectId} />)}
                 {activeTab === "daily_log" && (<DailyLogTab projectId={projectId} />)}
-                {activeTab === "resources" && (<ResourceTrackerTab project={project} renderedProjectBoq={renderedProjectBoq} projectResourceMap={projectResourceMap} resources={resources} updateProject={updateProject} loadData={loadData} />)}
+                {activeTab === "resources" && (<ResourceTrackerTab project={project} renderedProjectBoq={renderedProjectBoq} projectResourceMap={projectResourceMap} resources={resources} regions={regions} updateProject={updateProject} loadData={loadData} />)}
                 {activeTab === "procurement" && (<ProcurementTab projectId={projectId} />)}
                 {activeTab === "billing" && (<ClientBillingTab projectId={projectId} />)}
                 {activeTab === "kanban" && (<KanbanBoardTab projectId={projectId} />)}
                 {activeTab === "inventory" && (<InventoryTab projectId={projectId} />)}
                 {activeTab === "chat" && (<ChatModule projectId={projectId} orgStaff={orgStaff} loadData={loadData} />)}
+                {activeTab === "pdf_estimator" && (<VectorPlanEstimator />)}
             </Box>
         );
     }, [activeTab, project, regions, resources, totalAmount, renderedProjectBoq, projectResourceMap, crmContacts, orgStaff, projectBoqItems, masterBoqs, editorItem, formulaHelpOpen, exportOpts, projectId]);
