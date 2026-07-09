@@ -1,11 +1,28 @@
 import * as XLSX from "xlsx";
-import { calculateMasterBoqRate, getResourceRate } from "../engines/calculationEngine";
+import { calculateMasterBoqRate, getResourceRate, getSelectedRate } from "../engines/calculationEngine";
 
 export function exportProjectExcel(project, renderedProjectBoq, masterBoqs, resources) {
     if (!project || !renderedProjectBoq) return;
 
     const wb = XLSX.utils.book_new();
     let totalAmount = 0;
+
+    // Parse selected brands from project actualResources
+    let selectedBrands = {};
+    let actualRes = project.actualResources;
+    if (typeof actualRes === 'string') {
+        try { actualRes = JSON.parse(actualRes); } catch { }
+    }
+    if (actualRes) {
+        Object.entries(actualRes).forEach(([k, v]) => {
+            if (k.startsWith('brand_')) {
+                // key is brand_phase_resourceId
+                const parts = k.substring(6).split('_');
+                const resourceId = parts[parts.length - 1];
+                selectedBrands[resourceId] = v;
+            }
+        });
+    }
 
     // 1. GENERATE BOQ SHEET
     const boqData = renderedProjectBoq.map(item => {
@@ -77,7 +94,8 @@ export function exportProjectExcel(project, renderedProjectBoq, masterBoqs, reso
             if (comp.itemType === 'resource') {
                 const res = resources.find(r => r.id === comp.itemId);
                 if (!res) return;
-                const rate = getResourceRate(res, project.region);
+                const brandName = selectedBrands[res.id];
+                const rate = getSelectedRate(res, brandName, project.region);
                 const amt = compQty * rate; 
                 baseCost += amt;
                 rows.push(["Resource", res.code, res.description, res.unit, compQty, rate.toFixed(2), amt.toFixed(2)]);
@@ -85,7 +103,7 @@ export function exportProjectExcel(project, renderedProjectBoq, masterBoqs, reso
             else if (comp.itemType === 'boq') {
                 const nestedBoq = masterBoqs.find(b => b.id === comp.itemId);
                 if (!nestedBoq) return;
-                const rate = calculateMasterBoqRate(nestedBoq, resources, masterBoqs, project.region);
+                const rate = calculateMasterBoqRate(nestedBoq, resources, masterBoqs, project.region, new Set(), project);
                 const amt = compQty * rate; 
                 baseCost += amt;
                 rows.push(["Sub-Item", nestedBoq.itemCode, nestedBoq.description, nestedBoq.unit, compQty, rate.toFixed(2), amt.toFixed(2)]);

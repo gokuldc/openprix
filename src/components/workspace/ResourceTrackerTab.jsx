@@ -1,11 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import {
     Box, Paper, Typography, Table, TableBody, TableCell, TableContainer,
-    TableHead, TableRow, Switch, FormControlLabel, Select, MenuItem, TextField
+    TableHead, TableRow, Switch, FormControlLabel, Select, MenuItem, TextField, Button
 } from '@mui/material';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import { tableInputActiveStyle } from '../../styles';
 import { getResourceRate } from '../../engines/calculationEngine';
 import { useSettings } from '../../context/SettingsContext';
+import { exportResourceTrackerPdf } from '../../utils/exportPdf';
 
 export default function ResourceTrackerTab({ project, renderedProjectBoq, resources, regions = [], updateProject }) {
     const { formatCurrency } = useSettings();
