@@ -180,7 +180,7 @@ export default function DatabaseEditor() {
                 </Box>
 
                 <Box sx={{ flexGrow: 1 }}>
-                    {tab === "resources" && canAccess(2, 'resources') && <ResourcesTab regions={regions} resources={resources} loadData={loadData} />}
+                    {tab === "resources" && canAccess(2, 'resources') && <ResourcesTab regions={regions} resources={resources} masterBoqs={masterBoqs} loadData={loadData} />}
                     
                     {tab === "viewBoq" && canAccess(2, 'viewBoq') && (
                         <ViewBoqTab 

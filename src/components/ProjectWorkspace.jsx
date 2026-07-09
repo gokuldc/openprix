@@ -63,18 +63,18 @@ const RAW_CATEGORIES = {
         id: "planning", label: "PLANNING & SETUP", minClearance: 1, color: '#3b82f6',
         children: [
             { id: "details", label: "Project Details", minClearance: 1, icon: <InfoOutlinedIcon /> },
-            { id: "documents", label: "Docs & Drawings", minClearance: 1, icon: <FolderCopyOutlinedIcon /> },
+            // { id: "documents", label: "Docs & Drawings", minClearance: 1, icon: <FolderCopyOutlinedIcon /> },
             { id: "boq", label: "Master BOQ", minClearance: 3, icon: <ListAltOutlinedIcon /> },
-            { id: "schedule", label: "Gantt Schedule", minClearance: 2, icon: <CalendarTodayOutlinedIcon /> },
-            { id: "subcontractors", label: "Subcontractors", minClearance: 3, icon: <HandshakeOutlinedIcon /> }
+            // { id: "schedule", label: "Gantt Schedule", minClearance: 2, icon: <CalendarTodayOutlinedIcon /> },
+            // { id: "subcontractors", label: "Subcontractors", minClearance: 3, icon: <HandshakeOutlinedIcon /> }
         ]
     },
     execution: {
         id: "execution", label: "SITE EXECUTION", minClearance: 2, color: '#f59e0b',
         children: [
-            { id: "kanban", label: "Task Board", minClearance: 2, icon: <ViewKanbanOutlinedIcon /> },
-            { id: "gallery", label: "Site Photo Gallery", minClearance: 2, icon: <PhotoLibraryOutlinedIcon /> },
-            { id: "daily_log", label: "Daily Log", minClearance: 2, icon: <MenuBookOutlinedIcon /> },
+            // { id: "kanban", label: "Task Board", minClearance: 2, icon: <ViewKanbanOutlinedIcon /> },
+            // { id: "gallery", label: "Site Photo Gallery", minClearance: 2, icon: <PhotoLibraryOutlinedIcon /> },
+            // { id: "daily_log", label: "Daily Log", minClearance: 2, icon: <MenuBookOutlinedIcon /> },
             { id: "mbook", label: "Measurement Book", minClearance: 2, icon: <SquareFootOutlinedIcon /> },
             { id: "pdf_estimator", label: "PDF Qty Estimator", minClearance: 2, icon: <PictureAsPdfIcon /> }
         ]
@@ -83,22 +83,22 @@ const RAW_CATEGORIES = {
         id: "supply_chain", label: "SUPPLY CHAIN", minClearance: 2, color: '#10b981',
         children: [
             { id: "resources", label: "Resource Deficits", minClearance: 3, icon: <PrecisionManufacturingOutlinedIcon /> },
-            { id: "procurement", label: "Procurement (POs)", minClearance: 3, icon: <ShoppingCartOutlinedIcon /> },
-            { id: "inventory", label: "Stock Inventory", minClearance: 2, icon: <Inventory2OutlinedIcon /> }
+            // { id: "procurement", label: "Procurement (POs)", minClearance: 3, icon: <ShoppingCartOutlinedIcon /> },
+            // { id: "inventory", label: "Stock Inventory", minClearance: 2, icon: <Inventory2OutlinedIcon /> }
         ]
     },
-    financials: {
-        id: "financials", label: "FINANCIALS", minClearance: 4, color: '#8b5cf6',
-        children: [
-            { id: "billing", label: "Client RA Billing", minClearance: 4, icon: <ReceiptLongOutlinedIcon /> }
-        ]
-    },
-    communication: {
-        id: "communication", label: "COMMUNICATION", minClearance: 1, color: '#ec4899',
-        children: [
-            { id: "chat", label: "Project CommLink", minClearance: 1, icon: <ForumOutlinedIcon /> }
-        ]
-    }
+    // financials: {
+    //     id: "financials", label: "FINANCIALS", minClearance: 4, color: '#8b5cf6',
+    //     children: [
+    //         { id: "billing", label: "Client RA Billing", minClearance: 4, icon: <ReceiptLongOutlinedIcon /> }
+    //     ]
+    // },
+    // communication: {
+    //     id: "communication", label: "COMMUNICATION", minClearance: 1, color: '#ec4899',
+    //     children: [
+    //         { id: "chat", label: "Project CommLink", minClearance: 1, icon: <ForumOutlinedIcon /> }
+    //     ]
+    // }
 };
 
 export default function ProjectWorkspace({ projectId, onBack }) {

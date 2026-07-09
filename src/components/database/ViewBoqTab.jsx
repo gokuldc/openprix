@@ -1,9 +1,11 @@
 import { useState, useMemo, useRef } from "react";
-import { Box, Button, Typography, Paper, TextField, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, TableSortLabel, InputAdornment, Pagination, IconButton } from "@mui/material";
+import { Box, Button, Typography, Paper, TextField, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, TableSortLabel, InputAdornment, Pagination, IconButton, Backdrop, CircularProgress } from "@mui/material";
 import SearchIcon from '@mui/icons-material/Search';
 import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import * as XLSX from "xlsx";
 import AddCategoryModal from "./AddCategoryModal";
 import ConfirmDeleteCategoryModal from "./ConfirmDeleteCategoryModal";
@@ -148,6 +150,7 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
     const [sortDirection, setSortDirection] = useState('asc');
     const [page, setPage] = useState(0);
     const [rowsPerPage, setRowsPerPage] = useState(10);
+    const [uploadStatus, setUploadStatus] = useState({ active: false, status: 'idle', message: '' });
     const excelInputRef = useRef(null);
 
     const handleAddCategory = (newCat) => {
@@ -218,19 +221,35 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
     const paginatedBOQs = useMemo(() => processedBOQs.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage), [processedBOQs, page, rowsPerPage]);
 
     const generateDatabookTemplate = () => {
+        const match = selectedCategory ? selectedCategory.match(/^([\d.]+)\./) : null;
+        const sectionPrefix = match ? match[1] : "1";
+
         const wsData = [
-            { "BOQ_Code": "EXAMPLE-01", "BOQ_Description": "12 mm cement plaster of mix: 1:4", "BOQ_Unit": "sqm", "Overhead_Percent": 15, "Profit_Percent": 15, "Component_Type": "boq", "Component_Code": "MIX.01", "Component_Qty": 0.0144 },
-            { "BOQ_Code": "EXAMPLE-01", "BOQ_Description": "12 mm cement plaster of mix: 1:4", "BOQ_Unit": "sqm", "Overhead_Percent": 15, "Profit_Percent": 15, "Component_Type": "resource", "Component_Code": "0155", "Component_Qty": 0.067 }
+            {
+                "No": 1,
+                "Spec Code": `${sectionPrefix}.1.1`,
+                "Specification": "Earth work in excavation by mechanical means (Hydraulic excavator) / manual means in foundation trenches or drains (not exceeding 1.5 m in width or 10 sqm on plan), including dressing of sides and ramming of bottoms, lift upto 1.5 m, including getting out the excavated soil and disposal surplus excavated soil as directed, within a lead of 50 m. All kinds of soil.",
+                "Rate(₹)": 150.50,
+                "Unit": "cum"
+            },
+            {
+                "No": 2,
+                "Spec Code": `${sectionPrefix}.1.2`,
+                "Specification": "Providing and laying in position cement concrete of specified grade excluding the cost of centering and shuttering - All work up to plinth level : 1:2:4 (1 Cement : 2 coarse sand (zone-III) : 4 graded stone aggregate 20 mm nominal size).",
+                "Rate(₹)": 5400.00,
+                "Unit": "cum"
+            }
         ];
         const ws = XLSX.utils.json_to_sheet(wsData);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Databook Template");
-        XLSX.writeFile(wb, "Databook_Upload_Template.xlsx");
+        XLSX.utils.book_append_sheet(wb, ws, "Assemblies Template");
+        XLSX.writeFile(wb, "Assemblies_Upload_Template.xlsx");
     };
 
     const handleDatabookExcelUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
+        setUploadStatus({ active: true, status: 'loading', message: '' });
         const reader = new FileReader();
         reader.onload = async (event) => {
             try {
@@ -239,6 +258,88 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                 const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
                 if (jsonData.length === 0) throw new Error("Empty Excel file");
 
+                // Check if it is the new simple Assemblies format
+                const firstRowKeys = Object.keys(jsonData[0]);
+                const isSimpleFormat = firstRowKeys.some(k => k.includes("Spec Code") || k === "Code") &&
+                    firstRowKeys.some(k => k.includes("Specification") || k === "Description");
+
+                if (isSimpleFormat) {
+                    const resourcesToSave = [];
+                    const boqsToSave = [];
+
+                    jsonData.forEach(row => {
+                        // Find spec code key
+                        const codeKey = firstRowKeys.find(k => k.includes("Spec Code") || k === "Code");
+                        const descKey = firstRowKeys.find(k => k.includes("Specification") || k === "Description");
+                        const rateKey = firstRowKeys.find(k => k.includes("Rate") || k === "Price");
+                        const unitKey = firstRowKeys.find(k => k.includes("Unit"));
+
+                        const itemCode = String(row[codeKey] || "").trim();
+                        const description = String(row[descKey] || "").trim();
+                        const unit = String(row[unitKey] || "each").trim();
+                        const rate = Number(row[rateKey] || 0);
+
+                        if (!itemCode || !description) return;
+
+                        const resourceId = window.crypto.randomUUID();
+                        const ratesObj = {};
+                        regions.forEach(r => {
+                            ratesObj[r.name] = rate;
+                        });
+
+                        resourcesToSave.push({
+                            id: resourceId,
+                            code: itemCode,
+                            description,
+                            unit,
+                            rates: JSON.stringify(ratesObj),
+                            rateHistory: JSON.stringify([])
+                        });
+
+                        const components = [
+                            {
+                                itemType: "resource",
+                                itemId: resourceId,
+                                qty: 1,
+                                formulaStr: "1"
+                            }
+                        ];
+
+                        boqsToSave.push({
+                            itemCode,
+                            description,
+                            unit,
+                            overhead: 0,
+                            profit: 0,
+                            components: JSON.stringify(components)
+                        });
+                    });
+
+                    // 1. Bulk save resources
+                    await window.api.db.bulkSaveResources(resourcesToSave);
+
+                    // 2. Save master BOQs
+                    let added = 0;
+                    for (const boq of boqsToSave) {
+                        const existing = masterBoqs.find(b => b.itemCode === boq.itemCode);
+                        if (existing) {
+                            await window.api.db.saveMasterBoq(boq, existing.id, false);
+                        } else {
+                            await window.api.db.saveMasterBoq(boq, null, true);
+                        }
+                        added++;
+                    }
+
+                    setUploadStatus({
+                        active: true,
+                        status: 'success',
+                        message: `Databook Excel Processed!\n\nProcessed: ${added} items`
+                    });
+                    loadData();
+                    return;
+                }
+
+                // Fallback to old format
                 const boqGroups = {};
                 jsonData.forEach(row => {
                     const boqCode = String(row["BOQ_Code"] || "").trim();
@@ -265,9 +366,21 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                     if (existing) { await window.api.db.saveMasterBoq(payload, existing.id, false); updated++; }
                     else { await window.api.db.saveMasterBoq(payload, null, true); added++; }
                 }
-                alert(`Databook Excel Processed!\n\nProcessed: ${added + updated} items`);
+                setUploadStatus({
+                    active: true,
+                    status: 'success',
+                    message: `Databook Excel Processed!\n\nProcessed: ${added + updated} items`
+                });
                 loadData();
-            } catch (err) { alert("Failed to parse Excel file."); }
+            } catch (err) {
+                setUploadStatus({
+                    active: true,
+                    status: 'error',
+                    message: "Failed to parse Excel file."
+                });
+            } finally {
+                if (excelInputRef.current) excelInputRef.current.value = "";
+            }
         };
         reader.readAsArrayBuffer(file);
     };
@@ -278,6 +391,7 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
         const file = e.target.files[0];
         if (!file) return;
 
+        setUploadStatus({ active: true, status: 'loading', message: '' });
         const reader = new FileReader();
         reader.onload = async (event) => {
             try {
@@ -320,13 +434,21 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                     (lowerText.includes("unit") || lowerText.includes("unlt"));
 
                 if (!hasRequiredHeaders) {
-                    alert("Invalid format! The PDF must contain 'No', 'Spec Code', 'Specification', 'Rate(₹)', and 'Unit' columns.");
+                    setUploadStatus({
+                        active: true,
+                        status: 'error',
+                        message: "Invalid format! The PDF must contain 'No', 'Spec Code', 'Specification', 'Rate(₹)', and 'Unit' columns."
+                    });
                     return;
                 }
 
                 const parsedItems = parsePDFText(fullText);
                 if (parsedItems.length === 0) {
-                    alert("No valid items found in the PDF. Please check the format.");
+                    setUploadStatus({
+                        active: true,
+                        status: 'error',
+                        message: "No valid items found in the PDF. Please check the format."
+                    });
                     return;
                 }
 
@@ -385,11 +507,21 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                     }
                 }
 
-                alert(`PDF Assemblies Processed!\n\nAdded: ${added}\nUpdated: ${updated}`);
+                setUploadStatus({
+                    active: true,
+                    status: 'success',
+                    message: `PDF Assemblies Processed!\n\nAdded: ${added}`
+                });
                 loadData();
             } catch (err) {
                 console.error(err);
-                alert("Failed to parse or process the PDF file.");
+                setUploadStatus({
+                    active: true,
+                    status: 'error',
+                    message: "Failed to parse or process the PDF file."
+                });
+            } finally {
+                if (pdfInputRef.current) pdfInputRef.current.value = "";
             }
         };
         reader.readAsArrayBuffer(file);
@@ -402,101 +534,106 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
     return (
         <Box sx={{ width: '100%', overflow: 'hidden' }}>
             <Typography variant="h6" fontWeight="bold" mb={3} sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: '16px' }}>DATABOOK_ASSEMBLIES</Typography>
-            <Box display="flex" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
-                <TextField placeholder="Search Code..." variant="outlined" size="small" value={searchCode} onChange={(e) => { setSearchCode(e.target.value); setPage(0); }} sx={{ flex: 1, minWidth: 150 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                <TextField placeholder="Search Description..." variant="outlined" size="small" value={searchDesc} onChange={(e) => { setSearchDesc(e.target.value); setPage(0); }} sx={{ flex: 2, minWidth: 250 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                
-                <TextField
-                    select
-                    size="small"
-                    label="CATEGORY"
-                    value={selectedCategory}
-                    onChange={(e) => { 
-                        if (e.target.value === "__ADD_CATEGORY__") {
-                            setCategoryModalOpen(true);
-                        } else {
-                            setSelectedCategory(e.target.value); 
-                            setPage(0); 
-                        }
-                    }}
-                    sx={{ flex: 1.5, minWidth: 200 }}
-                    InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }}
-                    InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}
-                    SelectProps={{
-                        renderValue: (selected) => selected || "---select---"
-                    }}
-                >
-                    <MenuItem value="" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>---select---</MenuItem>
-                    <MenuItem value="__ADD_CATEGORY__" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: '#8b5cf6', fontWeight: 'bold' }}>+ Add Category</MenuItem>
-                    {categories.map(cat => {
-                        const isCustom = !STATIC_CATEGORIES.includes(cat);
-                        return (
-                            <MenuItem 
-                                key={cat} 
-                                value={cat} 
-                                sx={{ 
-                                    fontFamily: "'JetBrains Mono', monospace", 
-                                    fontSize: '12px',
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                    width: '100%',
-                                    minWidth: '240px'
+                <Box display="flex" flexDirection="column" gap={2} sx={{ width: '100%', mb: 3 }}>
+                    {/* Top Row: Template and Import Excel Buttons on the right side */}
+                    <Box display="flex" gap={2} alignItems="center" justifyContent="flex-end">
+                        <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={generateDatabookTemplate} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>TEMPLATE</Button>
+                        <input type="file" accept=".xls,.xlsx" ref={excelInputRef} style={{ display: 'none' }} onChange={(e) => { handleDatabookExcelUpload(e); excelInputRef.current.value = null; }} />
+                        <input type="file" accept=".pdf" ref={pdfInputRef} style={{ display: 'none' }} onChange={(e) => { handlePdfUpload(e); pdfInputRef.current.value = null; }} />
+                        <Button size="small" variant="contained" disableElevation startIcon={<UploadIcon />} onClick={() => excelInputRef.current.click()} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>IMPORT EXCEL</Button>
+                    </Box>
+
+                    {/* Bottom Row: Filters (Search, Category) & Upload/Add Entry buttons */}
+                    <Box display="flex" alignItems="center" flexWrap="wrap" gap={2}>
+                        <TextField placeholder="Search Code..." variant="outlined" size="small" value={searchCode} onChange={(e) => { setSearchCode(e.target.value); setPage(0); }} sx={{ flex: 1, minWidth: 150 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                        <TextField placeholder="Search Description..." variant="outlined" size="small" value={searchDesc} onChange={(e) => { setSearchDesc(e.target.value); setPage(0); }} sx={{ flex: 2, minWidth: 250 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+
+                        <TextField
+                            select
+                            size="small"
+                            label="CATEGORY"
+                            value={selectedCategory}
+                            onChange={(e) => {
+                                if (e.target.value === "__ADD_CATEGORY__") {
+                                    setCategoryModalOpen(true);
+                                } else {
+                                    setSelectedCategory(e.target.value);
+                                    setPage(0);
+                                }
+                            }}
+                            sx={{ flex: 1.5, minWidth: 200 }}
+                            InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }}
+                            InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}
+                            SelectProps={{
+                                renderValue: (selected) => selected || "---select---"
+                            }}
+                        >
+                            <MenuItem value="" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>---select---</MenuItem>
+                            <MenuItem value="__ADD_CATEGORY__" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: '#8b5cf6', fontWeight: 'bold' }}>+ Add Category</MenuItem>
+                            {categories.map(cat => {
+                                const isCustom = !STATIC_CATEGORIES.includes(cat);
+                                return (
+                                    <MenuItem
+                                        key={cat}
+                                        value={cat}
+                                        sx={{
+                                            fontFamily: "'JetBrains Mono', monospace",
+                                            fontSize: '12px',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            width: '100%',
+                                            minWidth: '240px'
+                                        }}
+                                    >
+                                        <span>{cat}</span>
+                                        {isCustom && (
+                                            <IconButton
+                                                size="small"
+                                                color="error"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setCategoryToDelete(cat);
+                                                    setDeleteCategoryModalOpen(true);
+                                                }}
+                                                sx={{ p: 0.5, ml: 2 }}
+                                            >
+                                                <DeleteIcon sx={{ fontSize: 16 }} />
+                                            </IconButton>
+                                        )}
+                                    </MenuItem>
+                                );
+                            })}
+                        </TextField>
+
+                        <Box display="flex" gap={2} alignItems="center" flexWrap="wrap" sx={{ ml: 'auto' }}>
+                            <Button size="small" variant="contained" color="secondary" disableElevation startIcon={<UploadIcon />} onClick={() => { if (!selectedCategory) { alert("Please select a category first!"); return; } pdfInputRef.current.click(); }} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)', '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' } }}>UPLOAD ASSEMBLY</Button>
+
+                            <Button
+                                size="small"
+                                variant="contained"
+                                onClick={() => {
+                                    if (!selectedCategory) {
+                                        alert("Please select a category first!");
+                                        return;
+                                    }
+                                    setAddEntryModalOpen(true);
+                                }}
+                                sx={{
+                                    height: 40,
+                                    px: 3,
+                                    borderRadius: 2,
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    fontSize: '11px',
+                                    background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)',
+                                    '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' }
                                 }}
                             >
-                                <span>{cat}</span>
-                                {isCustom && (
-                                    <IconButton
-                                        size="small"
-                                        color="error"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setCategoryToDelete(cat);
-                                            setDeleteCategoryModalOpen(true);
-                                        }}
-                                        sx={{ p: 0.5, ml: 2 }}
-                                    >
-                                        <DeleteIcon sx={{ fontSize: 16 }} />
-                                    </IconButton>
-                                )}
-                            </MenuItem>
-                        );
-                    })}
-                </TextField>
-
-                <Box display="flex" gap={2} alignItems="center" flexWrap="wrap" sx={{ ml: 'auto' }}>
-                    <Button size="small" variant="contained" color="secondary" disableElevation startIcon={<UploadIcon />} onClick={() => { if (!selectedCategory) { alert("Please select a category first!"); return; } pdfInputRef.current.click(); }} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)', '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' } }}>UPLOAD ASSEMBLY</Button>
-
-                    <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={generateDatabookTemplate} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>TEMPLATE</Button>
-                    <input type="file" accept=".xls,.xlsx" ref={excelInputRef} style={{ display: 'none' }} onChange={(e) => { handleDatabookExcelUpload(e); excelInputRef.current.value = null; }} />
-                    <input type="file" accept=".pdf" ref={pdfInputRef} style={{ display: 'none' }} onChange={(e) => { handlePdfUpload(e); pdfInputRef.current.value = null; }} />
-                    <Button size="small" variant="contained" disableElevation startIcon={<UploadIcon />} onClick={() => excelInputRef.current.click()} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>IMPORT EXCEL</Button>
-
-                    <Button
-                        size="small"
-                        variant="contained"
-                        onClick={() => {
-                            if (!selectedCategory) {
-                                alert("Please select a category first!");
-                                return;
-                            }
-                            setAddEntryModalOpen(true);
-                        }}
-                        sx={{
-                            height: 40,
-                            px: 3,
-                            borderRadius: 2,
-                            fontFamily: "'JetBrains Mono', monospace",
-                            fontSize: '11px',
-                            background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)',
-                            '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' }
-                        }}
-                    >
-                        + ADD DATABOOK ENTRY
-                    </Button>
+                                + ADD DATABOOK ENTRY
+                            </Button>
+                        </Box>
+                    </Box>
                 </Box>
-
-            </Box>
 
             <TableContainer component={Paper} elevation={0} variant="outlined" sx={{ overflowX: 'auto', width: '100%', borderRadius: '8px 8px 0 0', border: '1px solid', borderColor: 'divider', borderBottom: 'none', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
                 <Table size="small" sx={{ tableLayout: 'fixed', minWidth: '100%', width: Object.values(colWidths).reduce((a, b) => a + b, 0) }}>
@@ -587,6 +724,51 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                 masterBoqs={masterBoqs}
                 regions={regions}
             />
+
+            {/* EXCEL/PDF UPLOAD PROGRESS OVERLAY */}
+            <Backdrop
+                sx={{
+                    color: '#fff',
+                    zIndex: (theme) => theme.zIndex.drawer + 9999,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 3,
+                    background: 'rgba(5, 10, 20, 0.85)',
+                    backdropFilter: 'blur(10px)',
+                }}
+                open={uploadStatus.active}
+            >
+                {uploadStatus.status === 'success' ? (
+                    <CheckCircleOutlineIcon sx={{ fontSize: 60, color: '#00e676' }} />
+                ) : uploadStatus.status === 'error' ? (
+                    <ErrorOutlineIcon sx={{ fontSize: 60, color: '#ff1744' }} />
+                ) : (
+                    <CircularProgress color="primary" size={60} thickness={4} />
+                )}
+
+                <Box textAlign="center" sx={{ maxWidth: 400, width: '90%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 'bold', mb: 1, letterSpacing: '1px' }}>
+                        {uploadStatus.status === 'success' ? "IMPORT SUCCESSFUL" : uploadStatus.status === 'error' ? "IMPORT FAILED" : "PROCESSING_DATA"}
+                    </Typography>
+
+                    <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'rgba(255,255,255,0.6)', mb: 2, whiteSpace: 'pre-line' }}>
+                        {uploadStatus.status === 'success' || uploadStatus.status === 'error'
+                            ? uploadStatus.message
+                            : "Processing document assemblies, please wait..."}
+                    </Typography>
+
+                    {(uploadStatus.status === 'success' || uploadStatus.status === 'error') && (
+                        <Button
+                            variant="contained"
+                            color={uploadStatus.status === 'success' ? "primary" : "error"}
+                            onClick={() => setUploadStatus(prev => ({ ...prev, active: false }))}
+                            sx={{ mt: 3, borderRadius: 50, px: 5, fontFamily: "'JetBrains Mono', monospace" }}
+                        >
+                            Close
+                        </Button>
+                    )}
+                </Box>
+            </Backdrop>
         </Box>
     );
 }

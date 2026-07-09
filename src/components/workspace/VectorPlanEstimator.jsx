@@ -893,7 +893,7 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                                     {labelText}
                                                                 </div>
 
-                                                                {poly.width_m !== undefined && poly.height_m !== undefined && (
+                                                                {poly.width_m !== undefined && poly.height_m !== undefined ? (
                                                                     <>
                                                                         <div style={{
                                                                             width: '1px',
@@ -902,20 +902,28 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                                         }} />
                                                                         <div style={{
                                                                             fontSize: '10px',
-                                                                            fontWeight: '500',
-                                                                            color: 'rgba(255,255,255,0.7)',
+                                                                            fontWeight: '600',
+                                                                            color: 'rgba(255,255,255,0.85)',
                                                                             whiteSpace: 'nowrap'
                                                                         }}>
-                                                                            {poly.width_m}m × {poly.height_m}m
+                                                                            {poly.width_m} * {poly.height_m}
+                                                                        </div>
+                                                                        <div style={{
+                                                                            fontSize: '11px',
+                                                                            fontWeight: '700',
+                                                                            color: 'rgba(255,255,255,0.6)',
+                                                                            marginRight: '2px'
+                                                                        }}>
+                                                                            =
                                                                         </div>
                                                                     </>
+                                                                ) : (
+                                                                    <div style={{
+                                                                        width: '1px',
+                                                                        height: '12px',
+                                                                        background: 'rgba(255,255,255,0.2)'
+                                                                    }} />
                                                                 )}
-                                                                
-                                                                <div style={{
-                                                                    width: '1px',
-                                                                    height: '12px',
-                                                                    background: 'rgba(255,255,255,0.2)'
-                                                                }} />
                                                                 <div style={{
                                                                     fontSize: '11px',
                                                                     fontWeight: '700',
@@ -1227,14 +1235,16 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                 <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)' }}>Wall Thickness</TableCell>
                                                 <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold', borderBottomColor: 'rgba(255,255,255,0.05)' }}>{results.wall_thickness_m} m</TableCell>
                                             </TableRow>
+                                            {results.total_brickwork_cum !== undefined && (
+                                                <TableRow hover>
+                                                    <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)', fontWeight: '500' }}>Total Brickwork</TableCell>
+                                                    <TableCell align="right" sx={{ color: '#00e676', fontWeight: 'bold', borderBottomColor: 'rgba(255,255,255,0.05)' }}>{results.total_brickwork_cum} m³</TableCell>
+                                                </TableRow>
+                                            )}
 
                                             <TableRow hover>
                                                 <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)' }}>Gross Volume (Net + Waste)</TableCell>
                                                 <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold', borderBottomColor: 'rgba(255,255,255,0.05)' }}>{blockWorkVolume} m³</TableCell>
-                                            </TableRow>
-                                            <TableRow hover>
-                                                <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)' }}>Net Volume (Centerline)</TableCell>
-                                                <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold', borderBottomColor: 'rgba(255,255,255,0.05)' }}>{netVolume} m³</TableCell>
                                             </TableRow>
                                             <TableRow hover>
                                                 <TableCell sx={{ color: '#fff', borderBottomColor: 'rgba(255,255,255,0.05)' }}>Standard Block Count</TableCell>
@@ -1281,7 +1291,11 @@ export default function VectorPlanEstimator({ onQuantitiesCalculated }) {
                                                                 {poly.label} {poly.text_inside.length > 0 ? `("${poly.text_inside[0]}")` : `#${idx + 1}`}
                                                             </TableCell>
                                                             <TableCell align="right" sx={{ color: '#00e676', fontWeight: 'bold', borderBottomColor: 'rgba(255,255,255,0.05)', fontSize: '12px' }}>
-                                                                {poly.area_sqm} m²
+                                                                {poly.width_m !== undefined && poly.height_m !== undefined ? (
+                                                                    `${poly.width_m} * ${poly.height_m} = ${poly.area_sqm} m²`
+                                                                ) : (
+                                                                    `${poly.area_sqm} m²`
+                                                                )}
                                                             </TableCell>
                                                         </TableRow>
                                                     ))}

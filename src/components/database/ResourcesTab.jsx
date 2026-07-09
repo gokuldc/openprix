@@ -12,6 +12,8 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import EditIcon from '@mui/icons-material/Edit';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import DownloadIcon from '@mui/icons-material/Download';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { useSettings } from "../../context/SettingsContext";
 import ConfirmDeleteModal from "./ConfirmDeleteModal";
 import InflationDrawer from "./InflationDrawer";
@@ -25,6 +27,10 @@ const SearchInput = memo(({ value, onChange }) => {
         setLocalVal(value);
     }, [value]);
     useEffect(() => {
+        if (!localVal || localVal.trim() === "") {
+            onChange("");
+            return;
+        }
         const handler = setTimeout(() => {
             if (localVal !== value) {
                 onChange(localVal);
@@ -189,7 +195,7 @@ const RegisterMaterialForm = memo(({ onRegister }) => {
     );
 });
 
-export default function ResourcesTab({ regions, resources, loadData }) {
+export default function ResourcesTab({ regions, resources, masterBoqs = [], loadData }) {
     const theme = useTheme();
     const { formatCurrency } = useSettings();
     const fileInputRef = useRef(null);
@@ -208,7 +214,7 @@ export default function ResourcesTab({ regions, resources, loadData }) {
     const [selectedMonthYear, setSelectedMonthYear] = useState("");
     const [selectedRegion, setSelectedRegion] = useState(regions[0]?.name || "");
     const [brandSearchTerm, setBrandSearchTerm] = useState("");
-    const [uploadStatus, setUploadStatus] = useState({ active: false, current: 0, total: 0 });
+    const [uploadStatus, setUploadStatus] = useState({ active: false, current: 0, total: 0, status: 'idle', message: '' });
 
     useEffect(() => {
         if (regions.length > 0 && !selectedRegion) {
@@ -239,19 +245,44 @@ export default function ResourcesTab({ regions, resources, loadData }) {
     };
 
     const filteredResources = useMemo(() => {
-        const normalizedSearch = deferredSearchTerm.toLowerCase();
-        return resources.filter(r => {
+        const masterBoqCodes = new Set(masterBoqs.map(b => b.itemCode).filter(Boolean));
+        const normalizedSearch = !searchTerm || searchTerm.trim() === "" ? "" : deferredSearchTerm.toLowerCase();
+        const filtered = resources.filter(r => {
+            // Do not show master databook data (assemblies that exist in masterBoqs)
+            if (r.code && masterBoqCodes.has(r.code)) return false;
+
+            if (normalizedSearch === "") {
+                if (selectedRegion && hideEmptyRates) {
+                    const rate = r.rates?.[selectedRegion];
+                    return rate !== undefined && rate !== null && rate !== "" && Number(rate) >= 0;
+                }
+                return true;
+            }
+
             const matchesSearch = (r.code || "").toLowerCase().includes(normalizedSearch) ||
                 (r.description || "").toLowerCase().includes(normalizedSearch);
             if (!matchesSearch) return false;
 
             if (selectedRegion && hideEmptyRates) {
                 const rate = r.rates?.[selectedRegion];
-                return rate !== undefined && rate !== null && rate !== "" && Number(rate) > 0;
+                return rate !== undefined && rate !== null && rate !== "" && Number(rate) >= 0;
             }
             return true;
         });
-    }, [resources, deferredSearchTerm, selectedRegion, hideEmptyRates]);
+
+        // Sort by code (natural sort: numeric when possible, fallback to string compare)
+        return filtered.sort((a, b) => {
+            const codeA = String(a.code || "");
+            const codeB = String(b.code || "");
+            
+            const numA = Number(codeA);
+            const numB = Number(codeB);
+            if (!isNaN(numA) && !isNaN(numB)) {
+                return numA - numB;
+            }
+            return codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+        });
+    }, [resources, masterBoqs, searchTerm, deferredSearchTerm, selectedRegion, hideEmptyRates]);
 
     const totalPages = Math.ceil(filteredResources.length / itemsPerPage);
     const paginatedResources = useMemo(() => (
@@ -277,9 +308,18 @@ export default function ResourcesTab({ regions, resources, loadData }) {
     }, []);
 
     const handleRegisterResource = useCallback(async (data) => {
-        await window.api.db.createResource(data);
+        const initialRates = {};
+        regions.forEach(r => {
+            initialRates[r.name] = 0;
+        });
+        const payload = {
+            ...data,
+            rates: JSON.stringify(initialRates),
+            rateHistory: JSON.stringify([])
+        };
+        await window.api.db.createResource(payload);
         loadData();
-    }, [loadData]);
+    }, [loadData, regions]);
 
     // --- LOGIC HANDLERS ---
 
@@ -383,8 +423,14 @@ export default function ResourcesTab({ regions, resources, loadData }) {
                 const rateIdx = headers.findIndex(h => h.includes('rate') || h.includes('price'));
 
                 if (codeIdx === -1 || descIdx === -1 || rateIdx === -1) {
-                    setUploadStatus({ active: false, current: 0, total: 0 });
-                    return alert("Missing required columns. Ensure your file has 'Code', 'Description', and 'Rate' headers.");
+                    setUploadStatus({
+                        active: true,
+                        current: 0,
+                        total: 0,
+                        status: 'error',
+                        message: "Missing required columns. Ensure your file has 'Code', 'Description', and 'Rate' headers."
+                    });
+                    return;
                 }
 
                 const formattedData = [];
@@ -401,12 +447,18 @@ export default function ResourcesTab({ regions, resources, loadData }) {
                 }
 
                 if (formattedData.length === 0) {
-                    setUploadStatus({ active: false, current: 0, total: 0 });
-                    return alert("No valid material rows found under the headers.");
+                    setUploadStatus({
+                        active: true,
+                        current: 0,
+                        total: 0,
+                        status: 'error',
+                        message: "No valid material rows found under the headers."
+                    });
+                    return;
                 }
 
                 const total = formattedData.length;
-                setUploadStatus({ active: true, current: 0, total });
+                setUploadStatus({ active: true, current: 0, total, status: 'loading' });
 
                 const bulkPayload = formattedData.map(item => {
                     let existingRes = resources.find(r => r.code === item.code);
@@ -437,16 +489,27 @@ export default function ResourcesTab({ regions, resources, loadData }) {
                     }
                 });
 
-                setUploadStatus({ active: true, current: total, total });
+                setUploadStatus({ active: true, current: total, total, status: 'loading' });
                 await window.api.db.bulkSaveResources(bulkPayload);
 
-                alert(`Successfully imported ${formattedData.length} items into the [${importRegion}] market!`);
+                setUploadStatus({
+                    active: true,
+                    current: total,
+                    total,
+                    status: 'success',
+                    message: `${importRegion} region data uploaded successfully`
+                });
                 loadData();
             } catch (err) {
                 console.error("Import Error:", err);
-                alert("Failed to parse Excel file. Is the file corrupted?");
+                setUploadStatus({
+                    active: true,
+                    current: 0,
+                    total: 0,
+                    status: 'error',
+                    message: "Failed to parse Excel file. Is the file corrupted?"
+                });
             } finally {
-                setUploadStatus({ active: false, current: 0, total: 0 });
                 if (fileInputRef.current) fileInputRef.current.value = "";
             }
         };
@@ -783,15 +846,26 @@ export default function ResourcesTab({ regions, resources, loadData }) {
                 }}
                 open={uploadStatus.active}
             >
-                <CircularProgress color="primary" size={60} thickness={4} />
-                <Box textAlign="center" sx={{ maxWidth: 400, width: '90%' }}>
+                {uploadStatus.status === 'success' ? (
+                    <CheckCircleOutlineIcon sx={{ fontSize: 60, color: '#00e676' }} />
+                ) : uploadStatus.status === 'error' ? (
+                    <ErrorOutlineIcon sx={{ fontSize: 60, color: '#ff1744' }} />
+                ) : (
+                    <CircularProgress color="primary" size={60} thickness={4} />
+                )}
+                
+                <Box textAlign="center" sx={{ maxWidth: 400, width: '90%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 'bold', mb: 1, letterSpacing: '1px' }}>
-                        IMPORTING_EXCEL_DATA
+                        {uploadStatus.status === 'success' ? "IMPORT SUCCESSFUL" : uploadStatus.status === 'error' ? "IMPORT FAILED" : "IMPORTING_EXCEL_DATA"}
                     </Typography>
+                    
                     <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'rgba(255,255,255,0.6)', mb: 2 }}>
-                        Processing items into [{importRegion}] market...
+                        {uploadStatus.status === 'success' || uploadStatus.status === 'error' 
+                            ? uploadStatus.message 
+                            : `Processing items into [${importRegion}] market...`}
                     </Typography>
-                    {uploadStatus.total > 0 && (
+                    
+                    {uploadStatus.status !== 'success' && uploadStatus.status !== 'error' && uploadStatus.total > 0 && (
                         <Box sx={{ width: '100%', mt: 2 }}>
                             <LinearProgress
                                 variant="determinate"
@@ -810,6 +884,17 @@ export default function ResourcesTab({ regions, resources, loadData }) {
                                 {uploadStatus.current} / {uploadStatus.total} ({Math.round((uploadStatus.current / uploadStatus.total) * 100)}%)
                             </Typography>
                         </Box>
+                    )}
+
+                    {(uploadStatus.status === 'success' || uploadStatus.status === 'error') && (
+                        <Button
+                            variant="contained"
+                            color={uploadStatus.status === 'success' ? "primary" : "error"}
+                            onClick={() => setUploadStatus(prev => ({ ...prev, active: false }))}
+                            sx={{ mt: 3, borderRadius: 50, px: 5, fontFamily: "'JetBrains Mono', monospace" }}
+                        >
+                            Close
+                        </Button>
                     )}
                 </Box>
             </Backdrop>
