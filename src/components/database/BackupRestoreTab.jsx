@@ -3,35 +3,85 @@ import { Box, Button, Typography, Paper, Grid, Alert, Dialog, DialogTitle, Dialo
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import NukeDatabaseModal from "./NukeDatabaseModal";
 
 export default function BackupRestoreTab({ loadData }) {
     const [isRestoreOpen, setIsRestoreOpen] = useState(false);
+    
+    // Dialog states for replacing alert/confirm
+    const [statusModal, setStatusModal] = useState({ open: false, title: "", message: "", reload: false });
+    const [nukeModalOpen, setNukeModalOpen] = useState(false);
+
+    const showMessage = (title, message, reload = false) => {
+        setStatusModal({ open: true, title, message, reload });
+    };
 
     const handleBackup = async () => {
-        const res = await window.api.db.backupDatabase();
-        if (res.success) alert("Database backup saved successfully!");
-        else if (!res.canceled) alert("Backup failed: " + res.error);
+        try {
+            const res = await window.api.db.backupDatabase();
+
+            if (res && res.success === false) {
+                showMessage("Backup Failed", "Backup failed: " + res.error);
+                return;
+            }
+
+            const dateStr = new Date().toISOString().split('T')[0];
+            const link = document.createElement('a');
+            link.href = `data:application/octet-stream;base64,${res}`;
+            link.download = `OpenPrix_Master_Backup_${dateStr}.sqlite`;
+
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            showMessage("Backup Success", "Database backup downloaded successfully!");
+        } catch (e) {
+            showMessage("Backup Error", "Backup error: " + e.message);
+        }
     };
 
     const handleRestore = async (mode) => {
         setIsRestoreOpen(false);
-        const res = await window.api.db.restoreDatabase(mode);
-        if (res.success) {
-            alert(`Master Database restored successfully (${mode.toUpperCase()})! Active projects were safely preserved.`);
-            loadData();
-        } else if (!res.canceled) {
-            alert("Restore failed: " + res.error);
+
+        if (mode !== 'replace') {
+            showMessage("Information", "Note: The current Rust engine only supports FULL REPLACE for database restorations.");
+        }
+
+        try {
+            const fileResult = await window.api.os.pickFile(".sqlite");
+            if (!fileResult) return;
+
+            let base64Data = "";
+
+            if (typeof fileResult === 'object' && fileResult.base64) {
+                base64Data = fileResult.base64;
+            }
+            else if (typeof fileResult === 'string') {
+                const b64Str = await window.api.os.getBase64(fileResult);
+                if (!b64Str) throw new Error("Could not read the selected file.");
+                base64Data = b64Str.split(',')[1];
+            }
+
+            if (!base64Data) throw new Error("No valid file data could be extracted.");
+
+            const res = await window.api.db.restoreDatabase(base64Data);
+
+            if (typeof res === 'string') {
+                showMessage("DATABASE RESTORED", res + "\n\nThe application will now close. Please restart the OpenPrix Daemon and Client.", true);
+            } else if (res && res.success === false) {
+                showMessage("Restore Failed", "Restore failed: " + res.error);
+            }
+        } catch (e) {
+            showMessage("Restore Error", "Restore error: " + e.message);
         }
     };
 
-    const purgeMasterDatabase = async () => {
-        if (window.confirm("CRITICAL WARNING: This will permanently delete ALL Regions, Resources, and Databook items.")) {
-            if (window.confirm("Are you absolutely sure? Active projects may lose their master reference data. Type 'OK' to proceed:")) {
-                await window.api.db.purgeDatabase();
-                alert("Master Database has been completely purged.");
-                loadData();
-            }
+    const handlePurge = async () => {
+        const res = await window.api.db.purgeDatabase?.();
+        if (res && res.success === false) {
+            throw new Error(res.error || "Failed to purge database");
         }
+        loadData();
     };
 
     return (
@@ -68,20 +118,21 @@ export default function BackupRestoreTab({ loadData }) {
                         <Typography variant="body2" color="error.light" paragraph>
                             <strong>DANGER:</strong> Erase all Databook items, LMR Rates, and Resources. This cannot be undone.
                         </Typography>
-                        <Button variant="contained" color="error" size="large" onClick={purgeMasterDatabase} sx={{ mt: 2, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: '12px', fontWeight: 'bold' }}>
+                        <Button variant="contained" color="error" size="large" onClick={() => setNukeModalOpen(true)} sx={{ mt: 2, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: '12px', fontWeight: 'bold' }}>
                             NUKE DATABASE
                         </Button>
                     </Paper>
                 </Grid>
             </Grid>
 
+            {/* RESTORE DIALOG */}
             <Dialog open={isRestoreOpen} onClose={() => setIsRestoreOpen(false)} PaperProps={{ sx: { bgcolor: '#0d1f3c', border: '1px solid', borderColor: 'divider', minWidth: '400px' } }}>
                 <DialogTitle sx={{ fontFamily: "'JetBrains Mono', monospace", color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.1)', fontSize: '14px' }}>
                     MASTER DATA RESTORE RESOLUTION
                 </DialogTitle>
                 <DialogContent sx={{ pt: 3 }}>
                     <Typography sx={{ fontFamily: "'JetBrains Mono', monospace", mb: 3, color: '#ccc', fontSize: '12px' }}>
-                        How would you like to process the Master Data (Regions, Resources, Databook) from this backup file? <strong>Your active projects will not be affected.</strong>
+                        How would you like to process the Master Data from this backup file?
                     </Typography>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <Button variant="outlined" color="info" onClick={() => handleRestore('append')} sx={{ fontFamily: "'JetBrains Mono', monospace", justifyContent: 'flex-start', textTransform: 'none', py: 1.5, fontSize: '12px', textAlign: 'left' }}>
@@ -97,6 +148,30 @@ export default function BackupRestoreTab({ loadData }) {
                 </DialogContent>
                 <DialogActions sx={{ borderTop: '1px solid rgba(255,255,255,0.1)', p: 2 }}>
                     <Button onClick={() => setIsRestoreOpen(false)} sx={{ fontFamily: "'JetBrains Mono', monospace", color: '#ccc', fontSize: '12px' }}>CANCEL</Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* PROFESSIONAL NUKE DATABASE MODAL */}
+            <NukeDatabaseModal
+                open={nukeModalOpen}
+                onClose={() => setNukeModalOpen(false)}
+                onConfirm={handlePurge}
+            />
+
+            {/* STATUS / INFO / ERROR DIALOG */}
+            <Dialog open={statusModal.open} onClose={() => { setStatusModal(prev => ({ ...prev, open: false })); if (statusModal.reload) loadData(); }} PaperProps={{ sx: { bgcolor: '#0d1f3c', border: '1px solid', borderColor: 'divider', minWidth: '350px' } }}>
+                <DialogTitle sx={{ fontFamily: "'JetBrains Mono', monospace", color: '#fff', fontSize: '14px' }}>
+                    {statusModal.title}
+                </DialogTitle>
+                <DialogContent>
+                    <Typography sx={{ fontFamily: "'JetBrains Mono', monospace", color: '#ccc', fontSize: '13px', whiteSpace: 'pre-wrap' }}>
+                        {statusModal.message}
+                    </Typography>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => { setStatusModal(prev => ({ ...prev, open: false })); if (statusModal.reload) loadData(); }} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
+                        OK
+                    </Button>
                 </DialogActions>
             </Dialog>
         </Box>

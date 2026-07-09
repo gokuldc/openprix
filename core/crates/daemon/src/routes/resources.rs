@@ -55,3 +55,28 @@ pub async fn update_resource(State(pool): State<SqlitePool>, Path(id): Path<Stri
 pub async fn delete_resource(State(pool): State<SqlitePool>, Path(id): Path<String>) -> Result<Json<ApiResponse<bool>>, (StatusCode, Json<ApiResponse<()>>)> {
     api_response(sqlx::query("DELETE FROM resources WHERE id = ?").bind(id).execute(&pool).await.map(|_| true).map_err(|e| e.to_string()))
 }
+
+pub async fn bulk_save_resources(State(pool): State<SqlitePool>, Json(payload): Json<Vec<SaveResource>>) -> Result<Json<ApiResponse<bool>>, (StatusCode, Json<ApiResponse<()>>)> {
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => return api_response(Err(e.to_string())),
+    };
+    for item in payload {
+        let id = item.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let q = "INSERT OR REPLACE INTO resources (id, code, description, unit, rates, rateHistory) VALUES (?, ?, ?, ?, ?, ?)";
+        let res = sqlx::query(q)
+            .bind(&id)
+            .bind(item.code)
+            .bind(item.description)
+            .bind(item.unit)
+            .bind(item.rates.unwrap_or_else(|| "{}".into()))
+            .bind(item.rate_history.unwrap_or_else(|| "[]".into()))
+            .execute(&mut *tx)
+            .await;
+        if let Err(e) = res {
+            let _ = tx.rollback().await;
+            return api_response(Err(e.to_string()));
+        }
+    }
+    api_response(tx.commit().await.map(|_| true).map_err(|e| e.to_string()))
+}

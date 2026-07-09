@@ -254,7 +254,17 @@ export default function DatabaseEditor({ onBack }) {
 
     const editMasterBoq = (b) => {
         setEditingBoqId(b.id); setBoqCode(b.itemCode || ""); setBoqDesc(b.description); setBoqUnit(b.unit); setBoqOH(b.overhead || 0); setBoqProfit(b.profit || 0);
-        setBoqRows((b.components || []).map(c => ({ id: crypto.randomUUID(), itemType: c.itemType || 'resource', itemId: c.itemId, qty: c.qty, formulaStr: c.formulaStr || String(c.qty) })));
+        
+        let finalComponents = b.components || [];
+        if (finalComponents.length === 1) {
+            const singleComp = finalComponents[0];
+            const resource = resources.find(r => r.id === singleComp.itemId);
+            if (resource && resource.code === b.itemCode) {
+                finalComponents = [];
+            }
+        }
+
+        setBoqRows(finalComponents.map(c => ({ id: crypto.randomUUID(), itemType: c.itemType || 'resource', itemId: c.itemId, qty: c.qty, formulaStr: c.formulaStr || String(c.qty) })));
         setTab("createBoq");
     };
 

@@ -6,6 +6,7 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { calculateMasterBoqRate, getResourceRate } from "../../engines/calculationEngine";
 import { tableInputActiveStyle } from "../../styles";
 import FormulaGuideDialog from "../workspace/FormulaGuideDialog";
+import DatabaseDialog from "./DatabaseDialog";
 
 import { useSettings } from "../../context/SettingsContext";
 
@@ -23,6 +24,13 @@ export default function CreateBoqTab({ regions, resources, masterBoqs, loadData,
     const [localRows, setLocalRows] = useState({});
     const [formulaHelpOpen, setFormulaHelpOpen] = useState(false);
 
+    // Dialog state
+    const [dialogState, setDialogState] = useState({ open: false, title: "", message: "", severity: "warning" });
+
+    const triggerDialog = (title, message, severity = "warning") => {
+        setDialogState({ open: true, title, message, severity });
+    };
+
     // Initialize with editing data if provided
     useEffect(() => {
         if (editingBoq) {
@@ -36,7 +44,17 @@ export default function CreateBoqTab({ regions, resources, masterBoqs, loadData,
             const components = Array.isArray(editingBoq.components) ? editingBoq.components :
                 (typeof editingBoq.components === 'string' ? JSON.parse(editingBoq.components || '[]') : []);
 
-            setBoqRows(components.map(c => ({
+            // Filter out the auto-created self-reference resource if it's the only component
+            let finalComponents = components;
+            if (components.length === 1) {
+                const singleComp = components[0];
+                const resource = resources.find(r => r.id === singleComp.itemId);
+                if (resource && resource.code === editingBoq.itemCode) {
+                    finalComponents = [];
+                }
+            }
+
+            setBoqRows(finalComponents.map(c => ({
                 id: crypto.randomUUID(),
                 itemType: c.itemType || 'resource',
                 itemId: c.itemId,
@@ -93,13 +111,34 @@ export default function CreateBoqTab({ regions, resources, masterBoqs, loadData,
     }, [boqRows, resources, masterBoqs, previewRegion, boqOH, boqProfit]);
 
     const saveMasterBoq = async (isSaveAsNew = false) => {
-        if (!boqCode || !boqDesc) return alert("Please enter a Code and Description.");
+        if (!boqCode || !boqDesc) {
+            triggerDialog("Missing Information", "Please enter a Code and Description.", "warning");
+            return;
+        }
+
+        if (isSaveAsNew) {
+            const codeExists = (masterBoqs || []).some(b => 
+                String(b.itemCode).trim().toLowerCase() === String(boqCode).trim().toLowerCase()
+            );
+            if (codeExists) {
+                triggerDialog("Duplicate Item Code", `Error: The Item Code "${boqCode}" is already in use. Please enter a unique Item Code.`, "error");
+                return;
+            }
+        }
+
         const validComponents = renderedRows.filter(r => r.itemId && r.computedQty !== 0).map(r => ({ itemType: r.itemType, itemId: r.itemId, qty: Number(r.computedQty), formulaStr: r.formulaStr || String(r.computedQty) }));
-        if (validComponents.length === 0) return alert("Add at least one valid component.");
+        if (validComponents.length === 0) {
+            triggerDialog("Validation Failed", "Add at least one valid component.", "warning");
+            return;
+        }
         const payload = { itemCode: boqCode, description: boqDesc, unit: boqUnit, overhead: Number(boqOH), profit: Number(boqProfit), components: JSON.stringify(validComponents) };
 
         await window.api.db.saveMasterBoq(payload, editingBoq ? editingBoq.id : null, isSaveAsNew);
-        alert(isSaveAsNew ? "Saved as a New Databook Item!" : "Databook Item Saved!");
+        triggerDialog(
+            "Success",
+            isSaveAsNew ? "Saved as a New Databook Item!" : "Databook Item Saved!",
+            "success"
+        );
 
         if (clearEdit) clearEdit();
         loadData();
@@ -110,7 +149,7 @@ export default function CreateBoqTab({ regions, resources, masterBoqs, loadData,
 
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
                 <Typography variant="h6" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: '16px' }}>
-                    {editingBoq ? "EDIT" : "CREATE"}_DATABOOK_ITEM
+                    {editingBoq ? "EDIT" : "CREATE"}_DATABOOK_ASSEMBLY
                 </Typography>
                 {editingBoq && (
                     <Button size="small" variant="outlined" color="error" onClick={clearEdit} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>CANCEL_EDIT</Button>
@@ -160,7 +199,7 @@ export default function CreateBoqTab({ regions, resources, masterBoqs, loadData,
                             return (
                                 <TableRow key={row.id}>
                                     <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{idx + 1}</TableCell>
-                                    <TableCell><select value={row.itemType} onChange={e => updateSpreadsheetRow(row.id, 'itemType', e.target.value)} style={{ ...tableInputActiveStyle, width: '100%' }}><option value="resource">RESOURCE</option><option value="boq">DATABOOK_ITEM</option></select></TableCell>
+                                    <TableCell><select value={row.itemType} onChange={e => updateSpreadsheetRow(row.id, 'itemType', e.target.value)} style={{ ...tableInputActiveStyle, width: '100%', backgroundColor: '#0d1f3c', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', outline: 'none' }}><option value="resource" style={{ backgroundColor: '#0d1f3c', color: '#fff' }}>RESOURCE</option><option value="boq" style={{ backgroundColor: '#0d1f3c', color: '#fff' }}>DATABOOK_ITEM</option></select></TableCell>
 
                                     <TableCell>
                                         <input
@@ -280,6 +319,14 @@ export default function CreateBoqTab({ regions, resources, masterBoqs, loadData,
             </Box>
 
             <FormulaGuideDialog open={formulaHelpOpen} onClose={() => setFormulaHelpOpen(false)} />
+            
+            <DatabaseDialog 
+                open={dialogState.open}
+                onClose={() => setDialogState(prev => ({ ...prev, open: false }))}
+                title={dialogState.title}
+                message={dialogState.message}
+                severity={dialogState.severity}
+            />
         </Paper>
     );
 }

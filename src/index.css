@@ -43,7 +43,7 @@ body {
   background: var(--blueprint-bg);
   color: var(--blueprint-text);
   /* 🔥 ELECTRON FIX: Prevents the background from intercepting clicks */
-  -webkit-app-region: no-drag; 
+  -webkit-app-region: no-drag;
 }
 
 #root {
@@ -180,14 +180,28 @@ code {
 /* ========================================================
    🔥 ELECTRON INPUT & CURSOR FIX 
    ======================================================== */
-input, 
-textarea, 
-select, 
-.MuiInputBase-input, 
+input,
+textarea,
+select,
+.MuiInputBase-input,
 [contenteditable="true"] {
-    -webkit-user-select: text !important;
-    user-select: text !important;
-    cursor: text !important;
-    -webkit-app-region: no-drag !important;
-    pointer-events: auto !important;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  cursor: text !important;
+  -webkit-app-region: no-drag !important;
+  pointer-events: auto !important;
+}
+
+/* Fix for Portals: Ensures dragged table rows look correct outside the table context */
+body>.MuiTableRow-root {
+  display: table !important;
+  background-color: #0b172d !important;
+  /* Match your app background */
+  border: 1px solid #3b82f6 !important;
+  outline: none;
+}
+
+body>.MuiTableRow-root .MuiTableCell-root {
+  border-bottom: none !important;
+  color: white !important;
 }

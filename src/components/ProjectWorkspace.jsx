@@ -21,19 +21,17 @@ import InventoryTab from "./workspace/InventoryTab";
 import DocumentsTab from "./workspace/DocumentsTab";
 import SiteGalleryTab from "./workspace/SiteGalleryTab";
 import ChatModule from "./workspace/ChatModule";
+import VectorPlanEstimator from "./workspace/VectorPlanEstimator";
 
 import {
     Box, Typography, Button, Paper, Dialog, DialogTitle, DialogContent,
     DialogActions, FormControlLabel, Checkbox, IconButton, Tooltip,
-    List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divider, Chip
+    List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divider, Chip, Grid
 } from "@mui/material";
 
-// 🔥 Workspace Navigation Icons
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+// Workspace Navigation Icons
 import DownloadIcon from '@mui/icons-material/Download';
-import UploadIcon from '@mui/icons-material/Upload';
 import LockIcon from '@mui/icons-material/Lock';
-import SyncIcon from '@mui/icons-material/Sync';
 import MenuIcon from '@mui/icons-material/Menu';
 import MenuOpenIcon from '@mui/icons-material/MenuOpen';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
@@ -53,76 +51,198 @@ import ForumOutlinedIcon from '@mui/icons-material/ForumOutlined';
 
 import { useAuth } from "../context/AuthContext";
 
-// 🔥 UPDATED WORKFLOW SEQUENCE WITH ICONS & COLORS
+// 🔥 REACT QUERY HOOKS
+import { useQueryClient } from '@tanstack/react-query';
+import {
+    useProject, useRegions, useResources, useMasterBoqs, useProjectBoqs,
+    useCrmContacts, useStaff, useUpdateProject, useUpdateProjectBoq
+} from "../hooks/useQueries";
+
 const RAW_CATEGORIES = {
     planning: {
         id: "planning", label: "PLANNING & SETUP", minClearance: 1, color: '#3b82f6',
         children: [
             { id: "details", label: "Project Details", minClearance: 1, icon: <InfoOutlinedIcon /> },
-            { id: "documents", label: "Docs & Drawings", minClearance: 1, icon: <FolderCopyOutlinedIcon /> },
+            // { id: "documents", label: "Docs & Drawings", minClearance: 1, icon: <FolderCopyOutlinedIcon /> },
             { id: "boq", label: "Master BOQ", minClearance: 3, icon: <ListAltOutlinedIcon /> },
-            { id: "schedule", label: "Gantt Schedule", minClearance: 2, icon: <CalendarTodayOutlinedIcon /> },
-            { id: "subcontractors", label: "Subcontractors", minClearance: 3, icon: <HandshakeOutlinedIcon /> }
+            // { id: "schedule", label: "Gantt Schedule", minClearance: 2, icon: <CalendarTodayOutlinedIcon /> },
+            // { id: "subcontractors", label: "Subcontractors", minClearance: 3, icon: <HandshakeOutlinedIcon /> }
         ]
     },
     execution: {
         id: "execution", label: "SITE EXECUTION", minClearance: 2, color: '#f59e0b',
         children: [
-            { id: "kanban", label: "Task Board", minClearance: 2, icon: <ViewKanbanOutlinedIcon /> },
-            { id: "gallery", label: "Site Photo Gallery", minClearance: 2, icon: <PhotoLibraryOutlinedIcon /> },
-            { id: "daily_log", label: "Daily Log", minClearance: 2, icon: <MenuBookOutlinedIcon /> },
-            { id: "mbook", label: "Measurement Book", minClearance: 2, icon: <SquareFootOutlinedIcon /> }
+            // { id: "kanban", label: "Task Board", minClearance: 2, icon: <ViewKanbanOutlinedIcon /> },
+            // { id: "gallery", label: "Site Photo Gallery", minClearance: 2, icon: <PhotoLibraryOutlinedIcon /> },
+            // { id: "daily_log", label: "Daily Log", minClearance: 2, icon: <MenuBookOutlinedIcon /> },
+            { id: "mbook", label: "Measurement Book", minClearance: 2, icon: <SquareFootOutlinedIcon /> },
+            { id: "pdf_estimator", label: "PDF Qty Estimator", minClearance: 2, icon: <PictureAsPdfIcon /> }
         ]
     },
     supply_chain: {
         id: "supply_chain", label: "SUPPLY CHAIN", minClearance: 2, color: '#10b981',
         children: [
             { id: "resources", label: "Resource Deficits", minClearance: 3, icon: <PrecisionManufacturingOutlinedIcon /> },
-            { id: "procurement", label: "Procurement (POs)", minClearance: 3, icon: <ShoppingCartOutlinedIcon /> },
-            { id: "inventory", label: "Stock Inventory", minClearance: 2, icon: <Inventory2OutlinedIcon /> }
+            // { id: "procurement", label: "Procurement (POs)", minClearance: 3, icon: <ShoppingCartOutlinedIcon /> },
+            // { id: "inventory", label: "Stock Inventory", minClearance: 2, icon: <Inventory2OutlinedIcon /> }
         ]
     },
-    financials: {
-        id: "financials", label: "FINANCIALS", minClearance: 4, color: '#8b5cf6',
-        children: [
-            { id: "billing", label: "Client RA Billing", minClearance: 4, icon: <ReceiptLongOutlinedIcon /> }
-        ]
-    },
-    communication: {
-        id: "communication", label: "COMMUNICATION", minClearance: 1, color: '#ec4899',
-        children: [
-            { id: "chat", label: "Project CommLink", minClearance: 1, icon: <ForumOutlinedIcon /> }
-        ]
-    }
+    // financials: {
+    //     id: "financials", label: "FINANCIALS", minClearance: 4, color: '#8b5cf6',
+    //     children: [
+    //         { id: "billing", label: "Client RA Billing", minClearance: 4, icon: <ReceiptLongOutlinedIcon /> }
+    //     ]
+    // },
+    // communication: {
+    //     id: "communication", label: "COMMUNICATION", minClearance: 1, color: '#ec4899',
+    //     children: [
+    //         { id: "chat", label: "Project CommLink", minClearance: 1, icon: <ForumOutlinedIcon /> }
+    //     ]
+    // }
 };
 
 export default function ProjectWorkspace({ projectId, onBack }) {
     const { hasClearance, currentUser } = useAuth();
+    const queryClient = useQueryClient();
 
     // --- SIDEBAR STATE ---
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const SIDEBAR_CLOSED_WIDTH = 68;
     const SIDEBAR_OPEN_WIDTH = 260;
 
+    // 🔥 AUTOMATIC DATA FETCHING VIA REACT QUERY
+    const { data: rawProject, isLoading: isProjectLoading, error: projectError } = useProject(projectId);
+    const { data: regions = [] } = useRegions();
+    const { data: rawResources = [] } = useResources();
+    const { data: rawMasterBoqs = [] } = useMasterBoqs();
+    const { data: rawProjectBoqs = [] } = useProjectBoqs(projectId);
+    const { data: crmContacts = [] } = useCrmContacts();
+    const { data: orgStaff = [] } = useStaff();
+
+    // 🔥 MUTATION HOOKS
+    const updateProjectMutation = useUpdateProject();
+    const updateProjectBoqMutation = useUpdateProjectBoq();
+
+    // 🔥 SAFE DATA PARSING
+    const parseSafe = (str, fallback = []) => {
+        if (!str) return fallback;
+        if (typeof str !== 'string') return str;
+        try { return JSON.parse(str); } catch { return fallback; }
+    };
+
+    const project = useMemo(() => {
+        if (!rawProject) return null;
+        return {
+            ...rawProject,
+            dailyLogs: parseSafe(rawProject.dailyLogs, []), dailySchedules: parseSafe(rawProject.dailySchedules, []),
+            actualResources: parseSafe(rawProject.actualResources, {}), ganttTasks: parseSafe(rawProject.ganttTasks, []),
+            subcontractors: parseSafe(rawProject.subcontractors, []), purchaseOrders: parseSafe(rawProject.purchaseOrders, []),
+            raBills: parseSafe(rawProject.raBills, []), phaseAssignments: parseSafe(rawProject.phaseAssignments, {}),
+            materialRequests: parseSafe(rawProject.materialRequests, []), grns: parseSafe(rawProject.grns, [])
+        };
+    }, [rawProject]);
+
+    const resources = useMemo(() => rawResources.map(r => ({ ...r, rates: parseSafe(r.rates, {}), rateHistory: parseSafe(r.rateHistory, []) })), [rawResources]);
+    const masterBoqs = useMemo(() => rawMasterBoqs.map(b => ({ ...b, components: parseSafe(b.components, []) })), [rawMasterBoqs]);
+    const projectBoqItems = useMemo(() => rawProjectBoqs.map(b => ({ ...b, measurements: parseSafe(b.measurements, []) })), [rawProjectBoqs]);
+
+    const loadData = () => {
+        queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+        queryClient.invalidateQueries({ queryKey: ['projectBoqs', projectId] });
+        queryClient.invalidateQueries({ queryKey: ['resources'] });
+        queryClient.invalidateQueries({ queryKey: ['masterBoqs'] });
+    };
+
+    // 🔥 HYBRID WORKSPACE GATEKEEPER
+    useEffect(() => {
+        if (!project || !currentUser) return;
+
+        // 1. Super Admins bypass all locks
+        if (hasClearance(5)) return;
+
+        let permissions = {};
+        try {
+            const parsed = JSON.parse(project.assignedStaff || '{}');
+            if (Array.isArray(parsed)) {
+                parsed.forEach(id => permissions[id] = ["details", "documents"]);
+            } else {
+                permissions = parsed;
+            }
+        } catch (e) { permissions = {}; }
+
+        const userRule = permissions[currentUser.id];
+
+        // 2. EXPLICIT DENY: Overrides Level 4 Clearance
+        if (userRule === 'blocked') {
+            alert("ACCESS DENIED: You have been explicitly blocked from this project.");
+            return onBack();
+        }
+
+        // 3. GLOBAL FALLBACK: If not explicitly assigned, check clearance
+        if (userRule === undefined) {
+            const userPerms = typeof currentUser?.globalPermissions === 'string' ? JSON.parse(currentUser.globalPermissions) : (currentUser?.globalPermissions || []);
+            const hasGlobalOverride = userPerms.includes('workspace');
+
+            if (!hasClearance(4) && !hasGlobalOverride) {
+                alert("ACCESS DENIED: You are not assigned to this project's team.");
+                return onBack();
+            }
+        }
+    }, [project, currentUser, hasClearance, onBack]);
+
+    // 🔥 HYBRID GRANULAR TABS RESOLVER
     const ALLOWED_CATEGORIES = useMemo(() => {
+        if (!project || !currentUser) return {};
+        const isSuperAdmin = hasClearance(5);
+
+        let permissions = {};
+        try {
+            const parsed = JSON.parse(project.assignedStaff || '{}');
+            if (Array.isArray(parsed)) {
+                parsed.forEach(id => permissions[id] = ["details", "documents"]);
+            } else {
+                permissions = parsed;
+            }
+        } catch (e) { permissions = {}; }
+
+        const userRule = permissions[currentUser.id];
+        if (userRule === 'blocked') return {}; // Secondary safety catch
+
+        let userGlobalPerms = [];
+        try { userGlobalPerms = typeof currentUser?.globalPermissions === 'string' ? JSON.parse(currentUser.globalPermissions) : (currentUser?.globalPermissions || []); } catch (e) { }
+
         const filtered = {};
+
         for (const [key, cat] of Object.entries(RAW_CATEGORIES)) {
-            if (hasClearance(cat.minClearance)) {
-                const allowedChildren = cat.children.filter(child => hasClearance(child.minClearance));
-                if (allowedChildren.length > 0) {
-                    filtered[key] = { ...cat, children: allowedChildren };
+            const allowedChildren = cat.children.filter(child => {
+                // Super Admins see everything
+                if (isSuperAdmin) return true;
+
+                // 1. STRICT GRANULAR RULE OVERRIDE
+                if (Array.isArray(userRule)) {
+                    // If the PM explicitly assigned this user a strict list of tabs, enforce it.
+                    // This blocks a Level 4 from seeing "billing" if they were only granted "details".
+                    return userRule.includes(child.id);
                 }
+
+                // 2. DEFAULT HYBRID FALLBACK (User has no strict array rule, rely on global RBAC)
+                const hasGlobalLevelAccess = hasClearance(child.minClearance);
+                const hasGranularGlobalOverride = userGlobalPerms.includes(child.id);
+
+                return hasGlobalLevelAccess || hasGranularGlobalOverride;
+            });
+
+            if (allowedChildren.length > 0) {
+                filtered[key] = { ...cat, children: allowedChildren };
             }
         }
         return filtered;
-    }, [hasClearance]);
+    }, [project, hasClearance, currentUser]);
 
     const defaultCategory = Object.keys(ALLOWED_CATEGORIES)[0] || "planning";
     const defaultTab = ALLOWED_CATEGORIES[defaultCategory]?.children[0]?.id || "details";
-
     const [activeTab, setActiveTab] = useState(defaultTab);
 
-    // Ensure valid tab selection
     useEffect(() => {
         let found = false;
         for (const cat of Object.values(ALLOWED_CATEGORIES)) {
@@ -131,141 +251,35 @@ export default function ProjectWorkspace({ projectId, onBack }) {
         if (!found) setActiveTab(defaultTab);
     }, [ALLOWED_CATEGORIES, activeTab, defaultTab]);
 
-    const importFileRef = useRef(null);
-
-    const [syncFilePath, setSyncFilePath] = useState(null);
-    const [syncProjectName, setSyncProjectName] = useState("");
-    const [isSyncResolveOpen, setIsSyncResolveOpen] = useState(false);
     const [isExportOpen, setIsExportOpen] = useState(false);
     const [exportOpts, setExportOpts] = useState({
         details: true, boq: true, schedule_and_tasks: true, dailyLogs: true,
         subcontractors: true, inventory_grns: true, procurement_pos: true, financial_billing: true
     });
 
-    const [project, setProject] = useState("loading");
-    const [regions, setRegions] = useState([]);
-    const [resources, setResources] = useState([]);
-    const [masterBoqs, setMasterBoqs] = useState([]);
-    const [projectBoqItems, setProjectBoqItems] = useState([]);
-    const [crmContacts, setCrmContacts] = useState([]);
-    const [orgStaff, setOrgStaff] = useState([]);
-
-    const loadData = async () => {
-        try {
-            const [p, reg, res, mBoqs, pBoqs, contacts, staff] = await Promise.all([
-                window.api.db.getProject(projectId), window.api.db.getRegions(), window.api.db.getResources(),
-                window.api.db.getMasterBoqs(), window.api.db.getProjectBoqs(projectId),
-                window.api.db.getCrmContacts(), window.api.db.getOrgStaff()
-            ]);
-
-            if (p && !hasClearance(4)) {
-                const assigned = JSON.parse(p.assignedStaff || '[]');
-                if (!assigned.includes(currentUser.id)) {
-                    alert("ACCESS DENIED: You are not assigned to this project's team.");
-                    onBack();
-                    return;
-                }
-            }
-
-            const parseSafe = (str, fallback = []) => {
-                if (!str) return fallback;
-                if (typeof str !== 'string') return str;
-                try { return JSON.parse(str); } catch { return fallback; }
-            };
-
-            const safeRes = (res || []).map(r => ({ ...r, rates: parseSafe(r.rates, {}), rateHistory: parseSafe(r.rateHistory, []) }));
-            const safeMBoqs = (mBoqs || []).map(b => ({ ...b, components: parseSafe(b.components, []) }));
-            const safePBoqs = (pBoqs || []).map(b => ({ ...b, measurements: parseSafe(b.measurements, []) }));
-
-            const safeProject = p ? {
-                ...p,
-                dailyLogs: parseSafe(p.dailyLogs, []), dailySchedules: parseSafe(p.dailySchedules, []),
-                actualResources: parseSafe(p.actualResources, {}), ganttTasks: parseSafe(p.ganttTasks, []),
-                subcontractors: parseSafe(p.subcontractors, []), purchaseOrders: parseSafe(p.purchaseOrders, []),
-                raBills: parseSafe(p.raBills, []), phaseAssignments: parseSafe(p.phaseAssignments, {}),
-                materialRequests: parseSafe(p.materialRequests, []), grns: parseSafe(p.grns, [])
-            } : null;
-
-            setProject(safeProject || null);
-            setRegions(reg || []);
-            setResources(safeRes);
-            setMasterBoqs(safeMBoqs);
-            setProjectBoqItems(safePBoqs);
-            setCrmContacts(contacts || []);
-            setOrgStaff(staff || []);
-        } catch (error) {
-            console.error("Failed to load workspace data:", error);
-            setProject(null);
-        }
-    };
-
-    useEffect(() => { loadData(); }, [projectId]);
-
     const { renderedProjectBoq, totalAmount, projectResourceMap } = useProjectCalculations(projectBoqItems, masterBoqs, resources, project);
 
-    const [draggedId, setDraggedId] = useState(null);
     const [formulaHelpOpen, setFormulaHelpOpen] = useState(false);
     const [editorItem, setEditorItem] = useState(null);
 
-    if (project === "loading") return <Box p={5} textAlign="center"><Typography sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary' }}>Loading workspace...</Typography></Box>;
-    if (project === null) return <Box p={5} textAlign="center"><Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'error.main', mb: 2 }}>Error: Project Not Found</Typography><Button variant="outlined" onClick={onBack}>Return to Dashboard</Button></Box>;
-
+    // 🔥 MUTATION ACTIONS
     const updateProject = async (field, value) => {
-        // 1. Instantly update the React state (Optimistic UI)
-        setProject(prev => prev ? { ...prev, [field]: value } : prev);
-
-        // 2. Send network request in the background
         const valToSave = (typeof value === 'object' && value !== null) ? JSON.stringify(value) : value;
-        try {
-            await window.api.db.updateProject(projectId, { [field]: valToSave });
-        } catch (err) {
-            console.error("Network request failed, reverting UI:", err);
-            loadData(); // Revert back to server truth
-        }
+        await updateProjectMutation.mutateAsync({ id: projectId, data: { [field]: valToSave } });
     };
 
     const togglePriceLock = async () => {
-        if (!hasClearance(4)) return alert("Access Denied: Level 4 Clearance required to lock project pricing.");
-        const isCurrentlyLocked = project.isPriceLocked || false;
-        const willBeLocked = !isCurrentlyLocked;
+        if (!hasClearance(4)) return alert("Access Denied: Level 4 Clearance required.");
+        const willBeLocked = !(project.isPriceLocked || false);
 
         if (willBeLocked) {
-            const updates = renderedProjectBoq.map(item => window.api.db.updateProjectBoq(item.id, { lockedRate: item.rate }));
+            const updates = renderedProjectBoq.map(item => updateProjectBoqMutation.mutateAsync({ id: item.id, projectId, data: { lockedRate: item.rate } }));
             await Promise.all(updates);
         } else {
-            const updates = renderedProjectBoq.map(item => window.api.db.updateProjectBoq(item.id, { lockedRate: null }));
+            const updates = renderedProjectBoq.map(item => updateProjectBoqMutation.mutateAsync({ id: item.id, projectId, data: { lockedRate: null } }));
             await Promise.all(updates);
         }
-
-        await window.api.db.updateProject(projectId, { isPriceLocked: willBeLocked ? 1 : 0 });
-        loadData();
-    };
-
-    const handleDragStart = (e, id) => setDraggedId(id);
-    const handleDragOver = (e) => e.preventDefault();
-    const handleDrop = async (e, targetId) => {
-        e.preventDefault();
-        if (!draggedId || draggedId === targetId) { setDraggedId(null); return; }
-        const items = [...projectBoqItems].sort((a, b) => a.slNo - b.slNo);
-        const draggedIndex = items.findIndex(item => item.id === draggedId);
-        const targetIndex = items.findIndex(item => item.id === targetId);
-        if (draggedIndex === -1 || targetIndex === -1) return;
-
-        const [draggedItem] = items.splice(draggedIndex, 1);
-        items.splice(targetIndex, 0, draggedItem);
-        const updates = items.map((item, index) => ({ id: item.id, slNo: index + 1 }));
-
-        await Promise.all(updates.map(u => window.api.db.updateProjectBoq(u.id, { slNo: u.slNo })));
-        setDraggedId(null);
-        loadData();
-    };
-
-    const deleteProjectBoq = async (id) => {
-        await window.api.db.deleteProjectBoq(id);
-        const remaining = projectBoqItems.filter(item => item.id !== id).sort((a, b) => a.slNo - b.slNo);
-        const updates = remaining.map((item, index) => ({ id: item.id, slNo: index + 1 }));
-        await Promise.all(updates.map(u => window.api.db.updateProjectBoq(u.id, { slNo: u.slNo })));
-        loadData();
+        await updateProject('isPriceLocked', willBeLocked ? 1 : 0);
     };
 
     const handleExportData = async () => {
@@ -274,78 +288,61 @@ export default function ProjectWorkspace({ projectId, onBack }) {
         else if (!res.canceled) { alert("Export failed: " + res.error); }
     };
 
-    const handleImportData = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-            try {
-                const data = JSON.parse(evt.target.result);
-                await window.api.db.syncProjectData(project.id, data);
-                alert("Project data synchronized successfully!");
-                loadData();
-            } catch (err) { alert("Failed to read project sync file."); }
-        };
-        reader.readAsText(file);
-    };
+    // 🔥 MEMOIZED TAB RENDERING
+    const ActiveTabContent = useMemo(() => {
+        if (!project) return null;
+        return (
+            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                {activeTab === "details" && (<ProjectDetailsTab project={project} updateProject={updateProject} regions={regions} resources={resources} totalAmount={totalAmount} projectBoqItems={renderedProjectBoq} togglePriceLock={togglePriceLock} crmContacts={crmContacts} orgStaff={orgStaff} loadData={loadData} />)}
+                {activeTab === "documents" && (<DocumentsTab projectId={projectId} />)}
+                {activeTab === "gallery" && (<SiteGalleryTab projectId={projectId} />)}
+                {activeTab === "boq" && (<BoqBuilderTab projectId={projectId} openEditDialog={(item) => setEditorItem(item)} setFormulaHelpOpen={setFormulaHelpOpen} />)}
+                {activeTab === "mbook" && (<MeasurementBookTab projectId={projectId} setFormulaHelpOpen={setFormulaHelpOpen} />)}
+                {activeTab === "schedule" && (<GanttScheduleTab projectId={projectId} />)}
+                {activeTab === "subcontractors" && (<SubcontractorBidTab projectId={projectId} />)}
+                {activeTab === "daily_log" && (<DailyLogTab projectId={projectId} />)}
+                {activeTab === "resources" && (<ResourceTrackerTab project={project} renderedProjectBoq={renderedProjectBoq} projectResourceMap={projectResourceMap} resources={resources} regions={regions} updateProject={updateProject} loadData={loadData} />)}
+                {activeTab === "procurement" && (<ProcurementTab projectId={projectId} />)}
+                {activeTab === "billing" && (<ClientBillingTab projectId={projectId} />)}
+                {activeTab === "kanban" && (<KanbanBoardTab projectId={projectId} />)}
+                {activeTab === "inventory" && (<InventoryTab projectId={projectId} />)}
+                {activeTab === "chat" && (<ChatModule projectId={projectId} orgStaff={orgStaff} loadData={loadData} />)}
+                {activeTab === "pdf_estimator" && (<VectorPlanEstimator />)}
+            </Box>
+        );
+    }, [activeTab, project, regions, resources, totalAmount, renderedProjectBoq, projectResourceMap, crmContacts, orgStaff, projectBoqItems, masterBoqs, editorItem, formulaHelpOpen, exportOpts, projectId]);
 
-    const processSyncImport = async (mode) => {
-        if (!syncFilePath) return;
-        try {
-            const res = await window.api.db.executeProjectSync(project.id, syncFilePath, mode);
-            if (res.success) { alert(`Sync successful!`); loadData(); }
-            else { alert(`Failed to sync: ${res.error}`); }
-        } catch (err) { alert(`Failed to sync: ${err.message}`); }
-        finally { setIsSyncResolveOpen(false); setSyncFilePath(null); }
-    };
+    if (isProjectLoading) return <Box p={5} textAlign="center"><Typography sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary' }}>Loading workspace...</Typography></Box>;
+    if (projectError || project === null) return <Box p={5} textAlign="center"><Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'error.main', mb: 2 }}>Error: Project Not Found</Typography><Button variant="outlined" onClick={onBack}>Return to Dashboard</Button></Box>;
 
-    const handleAddMasterItem = async (addBoqId, addBoqQty, phase) => {
-        await window.api.db.addProjectBoq({ projectId, masterBoqId: addBoqId, slNo: projectBoqItems.length + 1, formulaStr: String(addBoqQty), qty: 0, measurements: JSON.stringify([]), phase, lockedRate: null });
-        loadData();
-    };
-
-    const handleAddCustomItem = async (customCode, customDesc, customUnit, customRate, customQty, phase) => {
-        await window.api.db.addProjectBoq({ projectId, slNo: projectBoqItems.length + 1, isCustom: true, measurements: JSON.stringify([]), itemCode: customCode, description: customDesc, unit: customUnit, rate: Number(customRate), formulaStr: String(customQty), qty: 0, phase });
-        loadData();
-    };
-
-    const updateBoqQtyManual = async (id, val) => { await window.api.db.updateProjectBoq(id, { formulaStr: val }); loadData(); };
+    // 🔥 ZERO-TAB GATEKEEPER: If no modules are allowed, show nothing but a lock screen.
+    if (Object.keys(ALLOWED_CATEGORIES).length === 0) {
+        return (
+            <Box display="flex" justifyContent="center" alignItems="center" height="100%" flexDirection="column" gap={2} sx={{ p: 5, textAlign: 'center' }}>
+                <LockIcon sx={{ fontSize: 60, color: 'error.main', opacity: 0.8 }} />
+                <Typography variant="h5" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'text.secondary', fontWeight: 'bold' }}>
+                    WORKSPACE_RESTRICTED
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 400 }}>
+                    All modules within this project have been explicitly revoked for your account. Please contact the Project Lead if you need access.
+                </Typography>
+                <Button variant="outlined" onClick={onBack} sx={{ mt: 3, fontFamily: "'JetBrains Mono', monospace", borderRadius: 50 }}>
+                    RETURN_TO_HOME
+                </Button>
+            </Box>
+        );
+    }
 
     return (
         <Box sx={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>
-
-            {/* 🔥 OPTIMIZED INTERNAL PROJECT SIDEBAR */}
-            <Paper
-                elevation={0}
-                sx={{
-                    width: sidebarOpen ? SIDEBAR_OPEN_WIDTH : { xs: 0, md: SIDEBAR_CLOSED_WIDTH },
-                    flexShrink: 0,
-                    bgcolor: 'rgba(13, 31, 60, 0.5)',
-                    borderRight: '1px solid', borderColor: 'divider',
-                    transition: 'width 0.225s cubic-bezier(0.4, 0, 0.2, 1)',
-                    overflowX: 'hidden',
-                    display: 'flex', flexDirection: 'column',
-                    position: { xs: 'fixed', md: 'relative' },
-                    height: '100%',
-                    zIndex: { xs: 1100, md: 1 },
-                    left: 0, top: 0
-                }}
-            >
+            <Paper elevation={0} sx={{ width: sidebarOpen ? SIDEBAR_OPEN_WIDTH : { xs: 0, md: SIDEBAR_CLOSED_WIDTH }, flexShrink: 0, bgcolor: 'rgba(13, 31, 60, 0.5)', borderRight: '1px solid', borderColor: 'divider', transition: 'width 0.225s cubic-bezier(0.4, 0, 0.2, 1)', overflowX: 'hidden', display: 'flex', flexDirection: 'column', position: { xs: 'fixed', md: 'relative' }, height: '100%', zIndex: { xs: 1100, md: 1 }, left: 0, top: 0, transform: 'translateZ(0)' }}>
                 <Box sx={{ p: 1, display: 'flex', justifyContent: sidebarOpen ? 'flex-end' : 'center', alignItems: 'center', height: 60 }}>
                     <IconButton onClick={() => setSidebarOpen(!sidebarOpen)} sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
                         {sidebarOpen ? <MenuOpenIcon /> : <MenuIcon />}
                     </IconButton>
                 </Box>
 
-                {/* 🔥 FIXED SCROLLBAR HIDING */}
-                <Box sx={{
-                    flexGrow: 1,
-                    overflowY: 'auto',
-                    overflowX: 'hidden',
-                    pb: 2,
-                    scrollbarWidth: 'none',
-                    '&::-webkit-scrollbar': { display: 'none' }
-                }}>
+                <Box sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', pb: 2, scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}>
                     <List sx={{ px: 1 }}>
                         {Object.entries(ALLOWED_CATEGORIES).map(([catKey, cat]) => (
                             <React.Fragment key={cat.id}>
@@ -387,15 +384,10 @@ export default function ProjectWorkspace({ projectId, onBack }) {
                 </Box>
             </Paper>
 
-            {/* Mobile Overlay */}
-            {sidebarOpen && (
-                <Box onClick={() => setSidebarOpen(false)} sx={{ display: { xs: 'block', md: 'none' }, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, bgcolor: 'rgba(0,0,0,0.5)', zIndex: 1000 }} />
-            )}
+            {sidebarOpen && <Box onClick={() => setSidebarOpen(false)} sx={{ display: { xs: 'block', md: 'none' }, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, bgcolor: 'rgba(0,0,0,0.5)', zIndex: 1000 }} />}
 
-            {/* 🔥 OPTIMIZED MAIN WORKSPACE CONTENT AREA */}
-            <Box sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', overflowX: 'hidden', p: { xs: 2, md: 3 } }}>
+            <Box sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', overflowX: 'hidden', p: { xs: 2, md: 3 }, transform: 'translateZ(0)' }}>
 
-                {/* HEADER */}
                 <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', lg: 'center' }, mb: 4, pb: 3, borderBottom: '1px solid', borderColor: 'divider', gap: { xs: 2, lg: 0 } }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                         <IconButton onClick={() => setSidebarOpen(true)} sx={{ display: { xs: 'block', md: 'none' }, color: 'text.secondary' }}>
@@ -411,35 +403,17 @@ export default function ProjectWorkspace({ projectId, onBack }) {
                     </Box>
 
                     <Box display="flex" gap={1.5} flexWrap="wrap" justifyContent={{ xs: 'flex-start', lg: 'flex-end' }}>
-                        {hasClearance(3) && (
-                            <>
-                                <input type="file" accept=".json" ref={importFileRef} style={{ display: 'none' }} onChange={handleImportData} />
-                                <Button variant="outlined" color="primary" startIcon={<UploadIcon />} onClick={() => importFileRef.current.click()} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>IMPORT</Button>
-                                <Button variant="outlined" color="primary" startIcon={<SyncIcon />} onClick={() => setIsExportOpen(true)} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>SYNC</Button>
-                            </>
-                        )}
-                        <Button variant="outlined" color="error" startIcon={<PictureAsPdfIcon />} onClick={() => exportProjectPdf(project, renderedProjectBoq, totalAmount)} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>PDF</Button>
-                        <Button variant="contained" color="success" startIcon={<DownloadIcon />} onClick={() => exportProjectExcel(project, renderedProjectBoq, masterBoqs, resources)} disableElevation sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>EXCEL</Button>
+                        <Button variant="outlined" color="error" startIcon={<PictureAsPdfIcon />} onClick={() => exportProjectPdf(project, renderedProjectBoq, totalAmount)} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>
+                            PDF
+                        </Button>
+                        <Button variant="contained" color="success" startIcon={<DownloadIcon />} onClick={() => exportProjectExcel(project, renderedProjectBoq, masterBoqs, resources)} disableElevation sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>
+                            EXCEL
+                        </Button>
                     </Box>
                 </Box>
 
-                {/* 🔥 DYNAMIC TAB CONTENT WITH DATA PIPELINE (loadData passed to all) */}
-                <Box sx={{ flexGrow: 1 }}>
-                    {activeTab === "details" && (<ProjectDetailsTab project={project} updateProject={updateProject} regions={regions} totalAmount={totalAmount} projectBoqItems={renderedProjectBoq} togglePriceLock={togglePriceLock} crmContacts={crmContacts} orgStaff={orgStaff} loadData={loadData} />)}
-                    {activeTab === "documents" && (<DocumentsTab projectId={projectId} loadData={loadData} />)}
-                    {activeTab === "gallery" && (<SiteGalleryTab projectId={projectId} loadData={loadData} />)}
-                    {activeTab === "boq" && (<BoqBuilderTab projectId={projectId} projectBoqItems={projectBoqItems} masterBoqs={masterBoqs} renderedProjectBoq={renderedProjectBoq} totalAmount={totalAmount} handleAddMasterItem={handleAddMasterItem} handleAddCustomItem={handleAddCustomItem} updateBoqQtyManual={updateBoqQtyManual} deleteProjectBoq={deleteProjectBoq} openEditDialog={(item) => setEditorItem(item)} setFormulaHelpOpen={setFormulaHelpOpen} handleDragStart={handleDragStart} handleDragOver={handleDragOver} handleDrop={handleDrop} draggedId={draggedId} loadData={loadData} />)}
-                    {activeTab === "mbook" && (<MeasurementBookTab renderedProjectBoq={renderedProjectBoq} setFormulaHelpOpen={setFormulaHelpOpen} loadData={loadData} />)}
-                    {activeTab === "schedule" && (<GanttScheduleTab project={project} projectBoqItems={projectBoqItems} updateProject={updateProject} loadData={loadData} />)}
-                    {activeTab === "subcontractors" && (<SubcontractorBidTab project={project} renderedProjectBoq={renderedProjectBoq} updateProject={updateProject} crmContacts={crmContacts} loadData={loadData} />)}
-                    {activeTab === "daily_log" && (<DailyLogTab project={project} projectBoqItems={projectBoqItems} resources={resources} updateProject={updateProject} loadData={loadData} />)}
-                    {activeTab === "resources" && (<ResourceTrackerTab project={project} renderedProjectBoq={renderedProjectBoq} projectResourceMap={projectResourceMap} resources={resources} updateProject={updateProject} loadData={loadData} />)}
-                    {activeTab === "procurement" && (<ProcurementTab project={project} projectResourceMap={projectResourceMap} resources={resources} updateProject={updateProject} crmContacts={crmContacts} loadData={loadData} />)}
-                    {activeTab === "billing" && (<ClientBillingTab project={project} renderedProjectBoq={renderedProjectBoq} updateProject={updateProject} loadData={loadData} />)}
-                    {activeTab === "kanban" && (<KanbanBoardTab project={project} renderedProjectBoq={renderedProjectBoq} orgStaff={orgStaff} updateProject={updateProject} loadData={loadData} />)}
-                    {activeTab === "inventory" && (<InventoryTab project={project} resources={resources} updateProject={updateProject} loadData={loadData} />)}
-                    {activeTab === "chat" && (<ChatModule projectId={projectId} orgStaff={orgStaff} loadData={loadData} />)}
-                </Box>
+                {/* 🔥 MEMOIZED TAB RENDERING */}
+                {ActiveTabContent}
 
             </Box>
 
@@ -462,19 +436,6 @@ export default function ProjectWorkspace({ projectId, onBack }) {
             </Dialog>
 
             <FormulaGuideDialog open={formulaHelpOpen} onClose={() => setFormulaHelpOpen(false)} />
-
-            <Dialog open={isSyncResolveOpen} onClose={() => setIsSyncResolveOpen(false)} PaperProps={{ sx: { bgcolor: '#0d1f3c', border: '1px solid', borderColor: 'divider', minWidth: '400px' } }}>
-                <DialogTitle sx={{ fontFamily: "'JetBrains Mono', monospace", color: '#fff', fontSize: '14px' }}>SYNC IMPORT RESOLUTION</DialogTitle>
-                <DialogContent sx={{ pt: 3 }}>
-                    <Typography sx={{ fontFamily: "'JetBrains Mono', monospace", mb: 2, color: 'info.main', fontSize: '13px', fontWeight: 'bold' }}>Incoming Data: {syncProjectName}</Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <Button variant="outlined" color="info" onClick={() => processSyncImport('append')}>[APPEND] New items only</Button>
-                        <Button variant="outlined" color="warning" onClick={() => processSyncImport('merge')}>[MERGE] Update existing</Button>
-                        <Button variant="outlined" color="error" onClick={() => processSyncImport('replace')}>[REPLACE] Overwrite everything</Button>
-                    </Box>
-                </DialogContent>
-                <DialogActions sx={{ p: 2 }}><Button onClick={() => setIsSyncResolveOpen(false)} sx={{ color: '#ccc' }}>CANCEL</Button></DialogActions>
-            </Dialog>
         </Box>
     );
 }

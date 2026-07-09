@@ -1,70 +1,108 @@
 import React, { useState } from 'react';
-import { Box, Paper, TextField, Button, Typography, Alert } from '@mui/material';
+import { Box, Paper, TextField, Button, Typography, Alert, CircularProgress, Fade } from '@mui/material';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
+import ShieldIcon from '@mui/icons-material/Shield';
 import { useAuth } from '../context/AuthContext';
+import '../styles/Login.css'; // Import the external CSS
 
 export default function Login() {
     const { login } = useAuth();
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
 
     const handleLogin = async (e) => {
         e.preventDefault();
         setError('');
+        setLoading(true);
+
         const success = await login(username, password);
+
         if (!success) {
-            setError('Invalid credentials or unauthorized access.');
+            setError('ACCESS DENIED: INVALID CREDENTIALS');
+            setLoading(false);
         }
     };
 
     return (
-        <Box display="flex" alignItems="center" justifyContent="center" minHeight="100vh" bgcolor="#060e1a">
-            <Paper elevation={0} sx={{ p: 5, width: 400, borderRadius: 2, border: '1px solid', borderColor: 'primary.main', bgcolor: '#0d1f3c' }}>
-                <Box display="flex" flexDirection="column" alignItems="center" mb={4}>
-                    <LockOutlinedIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-                    <Typography variant="h5" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'primary.main', letterSpacing: '2px' }}>
-                        {'// '}OPENPRIX
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                        SECURE SYSTEM ACCESS
-                    </Typography>
-                </Box>
-
-                {error && <Alert severity="error" sx={{ mb: 3, fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{error}</Alert>}
-
-                <form onSubmit={handleLogin}>
-                    <Box display="flex" flexDirection="column" gap={3}>
-                        <TextField
-                            label="EMPLOYEE ID / USERNAME"
-                            variant="outlined"
-                            fullWidth
-                            value={username}
-                            onChange={e => setUsername(e.target.value)}
-                            InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }}
-                        />
-                        <TextField
-                            label="SYSTEM PIN / PASSWORD"
-                            type="password"
-                            variant="outlined"
-                            fullWidth
-                            value={password}
-                            onChange={e => setPassword(e.target.value)}
-                            InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace" } }}
-                        />
-                        <Button
-                            type="submit"
-                            variant="contained"
-                            size="large"
-                            fullWidth
-                            disableElevation
-                            sx={{ mt: 2, py: 1.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px' }}
-                        >
-                            AUTHENTICATE
-                        </Button>
+        <Box className="login-page">
+            <Fade in={true} timeout={1000}>
+                <Paper elevation={0} className="login-card" sx={{ p: 5, width: 420 }}>
+                    <Box display="flex" flexDirection="column" alignItems="center" mb={4}>
+                        <ShieldIcon sx={{ color: '#00f2ff', fontSize: 40, mb: 1, filter: 'drop-shadow(0 0 8px rgba(0,242,255,0.4))' }} />
+                        <Typography variant="h5" className="brand-logo" sx={{ fontFamily: "'JetBrains Mono', monospace", color: '#00f2ff', fontWeight: 800 }}>
+                            BRIX
+                        </Typography>
+                        <Typography variant="caption" sx={{ fontFamily: "'JetBrains Mono', monospace", color: '#64ffda', mt: 1, opacity: 0.7 }}>
+                            VERIFYING SYSTEM IDENTITY...
+                        </Typography>
                     </Box>
-                </form>
-            </Paper>
+
+                    {error && (
+                        <Alert 
+                            severity="error" 
+                            variant="outlined"
+                            sx={{ 
+                                mb: 3, 
+                                borderRadius: 0, 
+                                color: '#ff5252', 
+                                borderColor: '#ff5252',
+                                fontFamily: "'JetBrains Mono', monospace",
+                                fontSize: '11px'
+                            }}
+                        >
+                            {error}
+                        </Alert>
+                    )}
+
+                    <form onSubmit={handleLogin}>
+                        <Box display="flex" flexDirection="column" gap={3}>
+                            <TextField
+                               label="USER IDENTIFIER"
+            className="custom-textfield"
+            variant="outlined"
+            fullWidth
+            disabled={loading}
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            autoComplete="one-time-code" 
+            inputProps={{ autoComplete: 'one-time-code' }}
+            autoFocus
+                            />
+                            <TextField
+                                 label="SECURITY PIN"
+            type="password"
+            className="custom-textfield"
+            variant="outlined"
+            fullWidth
+            disabled={loading}
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            autoComplete="new-password"
+            inputProps={{ autoComplete: 'new-password' }}
+                            />
+                            
+                            <Button
+                                type="submit"
+                                variant="contained"
+                                size="large"
+                                className="auth-button"
+                                fullWidth
+                                disabled={loading}
+                                disableElevation
+                                sx={{ mt: 2, py: 1.8, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '2px' }}
+                            >
+                                {loading ? <CircularProgress size={24} sx={{ color: '#fff' }} /> : "INITIALIZE LOGIN"}
+                            </Button>
+                        </Box>
+                    </form>
+
+                    <Typography className="footer-text">
+                        ENCRYPTED END-TO-END SESSION &bull; PORT: 443
+                    </Typography>
+                </Paper>
+            </Fade>
         </Box>
     );
 }

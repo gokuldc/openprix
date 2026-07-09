@@ -4,6 +4,7 @@ use serde::Serialize;
 pub mod auth;
 pub mod boqs;
 pub mod crm;
+pub mod db;
 pub mod messages;
 pub mod os;
 pub mod projects;

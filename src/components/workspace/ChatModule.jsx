@@ -10,7 +10,7 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import DescriptionIcon from '@mui/icons-material/Description';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
-import CloseIcon from '@mui/icons-material/Close'; 
+import CloseIcon from '@mui/icons-material/Close';
 import ReplyIcon from '@mui/icons-material/Reply';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
@@ -30,16 +30,16 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
     // --- State for Mentions, Attachments & Replies ---
     const [mentionSearch, setMentionSearch] = useState(null);
     const [cursorPos, setCursorPos] = useState(0);
-    const [anchorEl, setAnchorEl] = useState(null); 
-    const [projectDocs, setProjectDocs] = useState([]); 
-    const [replyingTo, setReplyingTo] = useState(null); 
-    
+    const [anchorEl, setAnchorEl] = useState(null);
+    const [projectDocs, setProjectDocs] = useState([]);
+    const [replyingTo, setReplyingTo] = useState(null);
+
     // State to track which message is currently flashing
     const [highlightedMsgId, setHighlightedMsgId] = useState(null);
 
     const messagesEndRef = useRef(null);
     const inputRef = useRef(null);
-    const fileInputRef = useRef(null); 
+    const fileInputRef = useRef(null);
 
     const loadMessages = async () => {
         try {
@@ -75,8 +75,8 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
         const date1 = new Date(d1);
         const date2 = new Date(d2);
         return date1.getFullYear() === date2.getFullYear() &&
-               date1.getMonth() === date2.getMonth() &&
-               date1.getDate() === date2.getDate();
+            date1.getMonth() === date2.getMonth() &&
+            date1.getDate() === date2.getDate();
     };
 
     const formatDateLabel = (ts) => {
@@ -126,27 +126,23 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
         inputRef.current?.focus();
     };
 
-    // --- LOGIC: Attachments & Linking ---
+    /// --- LOGIC: Attachments & Linking ---
     const handleFileAttach = async (e) => {
         const file = e.target?.files?.[0];
-        
+
         if (file) {
-            const reader = new FileReader();
-            reader.onload = async (evt) => {
-                const base64Data = evt.target.result;
-                const res = await window.api.os.uploadFileWeb(file.name, base64Data, projectId);
-                
-                if (res && typeof res === 'string') {
-                    sendSystemMessage(`📎 Attached: ${file.name}`, { type: 'file', path: res, name: file.name });
-                } else {
-                    alert("File upload failed: " + (res?.error || "Unknown error"));
-                }
-            };
-            reader.readAsDataURL(file); 
+            // 🔥 Use the new sandboxed Chat Upload API
+            const res = await window.api.db.uploadChatAttachment(file);
+
+            if (res && typeof res === 'string') {
+                sendSystemMessage(`📎 Attached: ${file.name}`, { type: 'file', path: res, name: file.name });
+            } else {
+                alert("File upload failed: " + (res?.error || "Unknown error"));
+            }
         }
-        
+
         setAnchorEl(null);
-        if (e.target) e.target.value = null; 
+        if (e.target) e.target.value = null;
     };
 
     const handleLinkExistingDoc = (doc) => {
@@ -161,7 +157,7 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
             content: metadata ? `__FILE_DATA__${JSON.stringify(metadata)}` : text,
             projectId: projectId,
             senderId: currentUser.id,
-            replyToId: replyingTo?.id || null, 
+            replyToId: replyingTo?.id || null,
             createdAt: Date.now()
         };
 
@@ -189,7 +185,7 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
                 } else {
                     await window.api.db.deleteMessage(msgId);
                 }
-                setMessages(prev => prev.filter(m => m.id !== msgId)); 
+                setMessages(prev => prev.filter(m => m.id !== msgId));
             } catch (err) {
                 console.error("Delete failed", err);
             }
@@ -200,7 +196,7 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
     const renderReplyContext = (replyToId) => {
         if (!replyToId) return null;
         const originalMsg = messages.find(m => m.id === replyToId);
-        
+
         if (!originalMsg) {
             return (
                 <Box sx={{ p: 0.5, px: 1, mb: 0.5, bgcolor: 'rgba(0,0,0,0.1)', borderRadius: 1, borderLeft: '2px solid rgba(255,255,255,0.2)' }}>
@@ -213,16 +209,16 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
         const isFile = originalMsg.content.startsWith('__FILE_DATA__');
 
         return (
-            <Box 
-                onClick={() => scrollToMessage(replyToId)} 
-                sx={{ 
-                    p: 0.5, px: 1, mb: 0.5, 
-                    bgcolor: 'rgba(0,0,0,0.15)', 
-                    borderRadius: 1, 
-                    borderLeft: '2px solid', 
-                    borderColor: 'primary.main', 
+            <Box
+                onClick={() => scrollToMessage(replyToId)}
+                sx={{
+                    p: 0.5, px: 1, mb: 0.5,
+                    bgcolor: 'rgba(0,0,0,0.15)',
+                    borderRadius: 1,
+                    borderLeft: '2px solid',
+                    borderColor: 'primary.main',
                     cursor: 'pointer',
-                    '&:hover': { bgcolor: 'rgba(0,0,0,0.25)' } 
+                    '&:hover': { bgcolor: 'rgba(0,0,0,0.25)' }
                 }}
             >
                 <Typography variant="caption" sx={{ display: 'block', fontWeight: 'bold', color: 'primary.light', fontSize: '9px' }}>{origSender?.name}</Typography>
@@ -274,19 +270,19 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
         });
     };
 
-    let lastDate = null; 
+    let lastDate = null;
 
     return (
-        <Paper sx={{ 
-            display: 'flex', 
-            flexDirection: 'column', 
+        <Paper sx={{
+            display: 'flex',
+            flexDirection: 'column',
             // 🔥 FIX: Height is now exactly 100% of the drawer, ensuring the bottom input isn't cut off
-            height: isGlobal ? '100%' : { xs: 'calc(100vh - 200px)', md: 'calc(100vh - 280px)' }, 
-            border: isGlobal ? 'none' : '1px solid', 
-            borderColor: 'divider', 
-            bgcolor: 'rgba(13, 31, 60, 0.5)', 
-            borderRadius: isGlobal ? 0 : 2, 
-            overflow: 'hidden' 
+            height: isGlobal ? '100%' : { xs: 'calc(100vh - 200px)', md: 'calc(100vh - 280px)' },
+            border: isGlobal ? 'none' : '1px solid',
+            borderColor: 'divider',
+            bgcolor: 'rgba(13, 31, 60, 0.5)',
+            borderRadius: isGlobal ? 0 : 2,
+            overflow: 'hidden'
         }}>
 
             {/* 1. HEADER */}
@@ -342,13 +338,13 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
                             <Typography sx={{ ml: 1, fontSize: '12px', fontWeight: 'bold' }}>DM: {selectedDmUser?.name}</Typography>
                         </Box>
                     )}
-                    
+
                     {/* CHAT MESSAGES CONTAINER */}
                     <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {messages.map((msg) => {
                             const isMe = msg.senderId === currentUser?.id;
                             const sender = orgStaff.find(s => s.id === msg.senderId);
-                            
+
                             const msgDate = new Date(msg.createdAt);
                             const showDateDivider = !lastDate || !isSameDay(lastDate, msgDate);
                             lastDate = msgDate;
@@ -363,34 +359,34 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
                                         </Divider>
                                     )}
 
-                                    <Box 
-                                        id={`msg-${msg.id}`} 
+                                    <Box
+                                        id={`msg-${msg.id}`}
                                         sx={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', gap: 1.5, alignItems: 'flex-end' }}
                                     >
                                         {!isMe && <Avatar sx={{ width: 28, height: 28 }}>{sender?.name?.charAt(0)}</Avatar>}
-                                        
+
                                         <Box sx={{ maxWidth: '85%', display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                                            
+
                                             {!isMe && viewMode !== 'dm_chat' && (
                                                 <Typography variant="caption" sx={{ px: 0.5, pb: 0.5, fontSize: '10px', fontWeight: 'bold', color: 'text.secondary' }}>
                                                     {sender?.name || 'Unknown'}
                                                 </Typography>
                                             )}
 
-                                            <Box sx={{ 
-                                                p: 1.5, 
-                                                borderRadius: 2, 
-                                                bgcolor: isFlashing ? 'rgba(59, 130, 246, 0.4)' : (isMe ? 'primary.main' : 'rgba(255,255,255,0.05)'), 
+                                            <Box sx={{
+                                                p: 1.5,
+                                                borderRadius: 2,
+                                                bgcolor: isFlashing ? 'rgba(59, 130, 246, 0.4)' : (isMe ? 'primary.main' : 'rgba(255,255,255,0.05)'),
                                                 color: '#fff',
                                                 transition: 'background-color 0.5s ease'
                                             }}>
                                                 {renderReplyContext(msg.replyToId)}
-                                                
+
                                                 <Box sx={{ typography: 'body2', fontFamily: "'Inter', sans-serif" }}>
                                                     {renderMessageContent(msg)}
                                                 </Box>
                                             </Box>
-                                            
+
                                             {/* ACTION BAR */}
                                             <Box display="flex" gap={0.5} alignItems="center" mt={0.5} sx={{ opacity: 0.7, '&:hover': { opacity: 1 } }}>
                                                 <Typography variant="caption" sx={{ fontSize: '9px', color: 'text.secondary', px: 1 }}>{formatTime(msg.createdAt)}</Typography>
@@ -438,7 +434,7 @@ export default function ChatModule({ projectId = null, orgStaff = [], onClose })
                                     {replyingTo.content.startsWith('__FILE_DATA__') ? 'Attachment' : replyingTo.content}
                                 </Typography>
                             </Box>
-                            <IconButton size="small" onClick={() => setReplyingTo(null)}><CloseIcon fontSize="small"/></IconButton>
+                            <IconButton size="small" onClick={() => setReplyingTo(null)}><CloseIcon fontSize="small" /></IconButton>
                         </Box>
                     )}
 

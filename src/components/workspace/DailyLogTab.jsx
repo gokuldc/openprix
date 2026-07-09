@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import {
     Box, Paper, Typography, Button, TextField, Autocomplete,
@@ -9,11 +9,108 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/Upload';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import SendIcon from '@mui/icons-material/Send';
 
-export default function DailyLogTab({ project, projectBoqItems, resources, updateProject, loadData }) {
+// 🔥 IMPORT REACT QUERY HOOKS
+import { useQueryClient } from '@tanstack/react-query';
+import { useProject, useProjectBoqs, useResources, useUpdateProject } from '../../hooks/useQueries';
+
+// ============================================================================
+// 🧩 SUB-COMPONENT: TASK EXECUTION ROW (Micro-State for smooth typing)
+// ============================================================================
+const TaskExecutionRow = ({ task, updateTaskInline }) => {
+    // Localize typing state to prevent full-tab re-renders
+    const [actualStart, setActualStart] = useState(task.actualStart || "");
+    const [actualEnd, setActualEnd] = useState(task.actualEnd || "");
+
+    // Sync if parent changes
+    useEffect(() => { setActualStart(task.actualStart || ""); }, [task.actualStart]);
+    useEffect(() => { setActualEnd(task.actualEnd || ""); }, [task.actualEnd]);
+
+    const handleBlur = (field, value) => {
+        if (task[field] !== value) {
+            updateTaskInline(task.id, field, value);
+        }
+    };
+
+    const handleStatusChange = (newStatus) => {
+        updateTaskInline(task.id, 'status', newStatus);
+    };
+
+    const isDone = task.status === "Completed";
+
+    return (
+        <TableRow hover sx={{ bgcolor: isDone ? 'rgba(16, 185, 129, 0.05)' : 'inherit' }}>
+            <TableCell sx={{ fontWeight: 'bold', fontSize: '12px', whiteSpace: 'nowrap' }}>{task.name}</TableCell>
+            <TableCell sx={{ color: 'info.main', fontSize: '11px', whiteSpace: 'nowrap' }}>{task.phase}</TableCell>
+            <TableCell>
+                <TextField select size="small" fullWidth value={task.status || "Not Started"} onChange={e => handleStatusChange(e.target.value)} InputProps={{ sx: { fontSize: '11px', height: 32, minWidth: '130px' } }}>
+                    <MenuItem value="Not Started">Not Started</MenuItem>
+                    <MenuItem value="In Progress" sx={{ color: 'info.main' }}>In Progress</MenuItem>
+                    <MenuItem value="Completed" sx={{ color: 'success.main' }}>Completed</MenuItem>
+                </TextField>
+            </TableCell>
+            <TableCell>
+                <TextField
+                    type="date" size="small" fullWidth
+                    value={actualStart}
+                    onChange={e => setActualStart(e.target.value)}
+                    onBlur={() => handleBlur('actualStart', actualStart)}
+                    InputProps={{ sx: { fontSize: '11px', height: 32, minWidth: '120px' } }}
+                />
+            </TableCell>
+            <TableCell>
+                <TextField
+                    type="date" size="small" fullWidth
+                    value={actualEnd}
+                    onChange={e => setActualEnd(e.target.value)}
+                    onBlur={() => handleBlur('actualEnd', actualEnd)}
+                    InputProps={{ sx: { fontSize: '11px', height: 32, minWidth: '120px' } }}
+                />
+            </TableCell>
+        </TableRow>
+    );
+};
+
+// ============================================================================
+// 🚀 MAIN COMPONENT
+// ============================================================================
+export default function DailyLogTab({ projectId }) {
+    const queryClient = useQueryClient();
+
+    // 1. Fetching Data Independently via React Query
+    const { data: rawProject } = useProject(projectId);
+    const { data: rawProjectBoqs = [] } = useProjectBoqs(projectId);
+    const { data: rawResources = [] } = useResources();
+    const updateProjectMutation = useUpdateProject();
+
+    // 2. Safe Parsing
+    const parseSafe = (str, fallback = []) => {
+        if (!str) return fallback;
+        if (typeof str !== 'string') return str;
+        try { return JSON.parse(str); } catch { return fallback; }
+    };
+
+    const project = useMemo(() => {
+        if (!rawProject) return null;
+        return {
+            ...rawProject,
+            dailyLogs: parseSafe(rawProject.dailyLogs, []),
+            dailySchedules: parseSafe(rawProject.dailySchedules, []),
+            ganttTasks: parseSafe(rawProject.ganttTasks, []),
+            materialRequests: parseSafe(rawProject.materialRequests, [])
+        };
+    }, [rawProject]);
+
+    const projectBoqItems = useMemo(() => rawProjectBoqs.map(b => ({ ...b, measurements: parseSafe(b.measurements, []) })), [rawProjectBoqs]);
+    const resources = useMemo(() => rawResources.map(r => ({ ...r, rates: parseSafe(r.rates, {}) })), [rawResources]);
+
+    const validLogs = project?.dailyLogs || [];
+    const validSchedules = project?.dailySchedules || [];
+    const validTasks = project?.ganttTasks || [];
+    const validRequests = project?.materialRequests || [];
+
+    // --- STATE ---
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [activePhase, setActivePhase] = useState("General");
     const [selectedRes, setSelectedRes] = useState(null);
@@ -44,18 +141,17 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
         return Array.from(phases);
     }, [projectBoqItems]);
 
-    const validLogs = Array.isArray(project?.dailyLogs) ? project.dailyLogs.filter(l => l && l.id) : [];
-    const validSchedules = Array.isArray(project?.dailySchedules) ? project.dailySchedules.filter(s => s && s.id) : [];
-    const validTasks = Array.isArray(project?.ganttTasks) ? project.ganttTasks.filter(t => t && t.id) : [];
+    // --- DATABASE ACTIONS ---
+    const updateProjectField = async (field, value) => {
+        await updateProjectMutation.mutateAsync({
+            id: projectId,
+            data: { [field]: JSON.stringify(value) }
+        });
+    };
 
-    // --- LOGIC (KEEPING 100% ORIGINAL FUNCTIONALITY) ---
     const submitMaterialRequest = async () => {
         if (!reqItem || !reqQty) return alert("Please enter item name and quantity.");
         try {
-            const liveProject = await window.api.db.getProject(project.id);
-            const liveRequests = liveProject.materialRequests ? JSON.parse(liveProject.materialRequests) : [];
-            const liveTasks = liveProject.ganttTasks ? JSON.parse(liveProject.ganttTasks) : [];
-
             const newReq = {
                 id: crypto.randomUUID(),
                 date: new Date().toISOString().split('T')[0],
@@ -76,39 +172,47 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
                 description: `Site requested ${reqQty} of ${reqItem} on ${newReq.date}.`
             };
 
-            await window.api.db.updateProject(project.id, {
-                materialRequests: JSON.stringify([...liveRequests, newReq]),
-                ganttTasks: JSON.stringify([...liveTasks, newTask])
+            // Batch update using the React Query mutation
+            await updateProjectMutation.mutateAsync({
+                id: projectId,
+                data: {
+                    materialRequests: JSON.stringify([...validRequests, newReq]),
+                    ganttTasks: JSON.stringify([...validTasks, newTask])
+                }
             });
 
-            if (loadData) loadData();
             setReqItem(""); setReqQty("");
             alert("Requisition successfully submitted to Procurement & Kanban board!");
         } catch (error) {
             console.error(error);
-            alert("Failed to save. Ensure your database has the materialRequests column.");
+            alert("Failed to save. Ensure your database is properly configured.");
         }
     };
 
     const addLog = async () => {
         if (!date || !activePhase || !selectedRes || !qty) return alert("Please fill all fields.");
-        const newLog = { id: crypto.randomUUID(), date, phase: activePhase, resourceId: selectedRes.id, qty: Number(qty) };
-        const logs = [...validLogs, newLog];
-        await updateProject("dailyLogs", logs);
+        // 🔥 CRITICAL INVENTORY FIX: Structure it so InventoryTab.jsx can read the nested resources
+        const newLog = {
+            id: crypto.randomUUID(),
+            date,
+            phase: activePhase,
+            resourceId: selectedRes.id, // For backward compatibility
+            qty: Number(qty), // For backward compatibility
+            resources: [{ resourceId: selectedRes.id, qty: Number(qty) }] // 🔥 Correct format for InventoryTab
+        };
+        await updateProjectField("dailyLogs", [...validLogs, newLog]);
         setQty(""); setSelectedRes(null);
     };
 
     const deleteLog = async (id) => {
-        const logs = validLogs.filter(l => l.id !== id);
-        await updateProject("dailyLogs", logs);
+        await updateProjectField("dailyLogs", validLogs.filter(l => l.id !== id));
     };
 
     const saveCustomResource = async () => {
         if (!customCode || !customDesc) return alert("Code and Description required.");
-        const newId = crypto.randomUUID();
-        const newRes = { id: newId, code: customCode, description: customDesc, unit: customUnit, rates: {} };
+        const newRes = { id: crypto.randomUUID(), code: customCode, description: customDesc, unit: customUnit, rates: "{}" };
         await window.api.db.createResource(newRes);
-        if (loadData) await loadData();
+        queryClient.invalidateQueries({ queryKey: ['resources'] });
         setSelectedRes(newRes);
         setIsCustomOpen(false);
         setCustomCode(""); setCustomDesc("");
@@ -117,40 +221,32 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
     const addSchedule = async () => {
         if (!scheduleDate || !shiftStart || !shiftEnd) return alert("Please specify Date and Shift timings.");
         const newSchedule = { id: crypto.randomUUID(), date: scheduleDate, shiftStart, shiftEnd, weather, notes: shiftNotes };
-        const schedules = [...validSchedules, newSchedule];
-        await updateProject("dailySchedules", schedules);
+        await updateProjectField("dailySchedules", [...validSchedules, newSchedule]);
         setShiftNotes("");
     };
 
     const deleteSchedule = async (id) => {
-        const schedules = validSchedules.filter(s => s.id !== id);
-        await updateProject("dailySchedules", schedules);
+        await updateProjectField("dailySchedules", validSchedules.filter(s => s.id !== id));
     };
 
-    const handleTaskStatusChange = async (taskId, newStatus) => {
+    // Passed down to the TaskExecutionRow
+    const updateTaskInline = async (taskId, field, value) => {
         const today = new Date().toISOString().split('T')[0];
         const updatedTasks = validTasks.map(t => {
             if (t.id === taskId) {
-                const updated = { ...t, status: newStatus };
-                if (newStatus === "In Progress" && !updated.actualStart) updated.actualStart = today;
-                if (newStatus === "Completed") {
-                    if (!updated.actualStart) updated.actualStart = today;
-                    if (!updated.actualEnd) updated.actualEnd = today;
+                const updated = { ...t, [field]: value };
+                if (field === 'status') {
+                    if (value === "In Progress" && !updated.actualStart) updated.actualStart = today;
+                    if (value === "Completed") {
+                        if (!updated.actualStart) updated.actualStart = today;
+                        if (!updated.actualEnd) updated.actualEnd = today;
+                    }
                 }
                 return updated;
             }
             return t;
         });
-        await updateProject("ganttTasks", updatedTasks);
-
-        if (loadData) loadData();
-    };
-
-    const handleTaskDateChange = async (taskId, field, value) => {
-        const updatedTasks = validTasks.map(t => t.id === taskId ? { ...t, [field]: value } : t);
-        await updateProject("ganttTasks", updatedTasks);
-
-        if (loadData) loadData();
+        await updateProjectField("ganttTasks", updatedTasks);
     };
 
     const exportTemplate = () => {
@@ -167,7 +263,7 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
         const ws = XLSX.utils.aoa_to_sheet(wsData);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Daily_Material_Logs");
-        XLSX.writeFile(wb, `${project.name || 'Project'}_MaterialLogs.xlsx`);
+        XLSX.writeFile(wb, `${project?.name || 'Project'}_MaterialLogs.xlsx`);
     };
 
     const handleImport = async (e) => {
@@ -180,8 +276,10 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
                 const workbook = XLSX.read(data, { type: 'array' });
                 const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { raw: false });
                 if (jsonData.length === 0) return;
+
                 const newLogs = [];
                 let requiresGlobalRefresh = false;
+
                 for (const row of jsonData) {
                     const dateRaw = row["Date"] || row["Date (YYYY-MM-DD)"];
                     const phase = row["Phase"] || "General";
@@ -189,22 +287,34 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
                     const qty = Number(row["Quantity Consumed"]);
                     const desc = String(row["Resource Description"] || "");
                     const unit = String(row["Unit"] || "nos");
+
                     if (!dateRaw || !code || isNaN(qty)) continue;
+
                     let resource = resources.find(r => (r.code || "").trim().toLowerCase() === code.toLowerCase());
                     if (!resource) {
                         const newResId = crypto.randomUUID();
-                        const newRes = { id: newResId, code: code, description: desc || `Imported ${code}`, unit: unit, rates: {} };
+                        const newRes = { id: newResId, code: code, description: desc || `Imported ${code}`, unit: unit, rates: "{}" };
                         await window.api.db.createResource(newRes);
-                        resource = newRes; requiresGlobalRefresh = true;
+                        resource = newRes;
+                        requiresGlobalRefresh = true;
                     }
-                    if (resource) newLogs.push({ id: crypto.randomUUID(), date: dateRaw, phase, resourceId: resource.id, qty });
+                    if (resource) {
+                        newLogs.push({
+                            id: crypto.randomUUID(),
+                            date: dateRaw,
+                            phase,
+                            resourceId: resource.id,
+                            qty,
+                            resources: [{ resourceId: resource.id, qty: qty }]
+                        });
+                    }
                 }
                 if (newLogs.length > 0) {
-                    await updateProject("dailyLogs", [...validLogs, ...newLogs]);
+                    await updateProjectField("dailyLogs", [...validLogs, ...newLogs]);
                     alert(`Imported ${newLogs.length} logs!`);
-                    if (loadData) await loadData();
+                    if (requiresGlobalRefresh) queryClient.invalidateQueries({ queryKey: ['resources'] });
                 }
-            } catch (err) { alert("Import failed."); }
+            } catch (err) { alert("Import failed. Please check file format."); }
         };
         reader.readAsArrayBuffer(file);
         e.target.value = null;
@@ -356,7 +466,7 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
                 </TableContainer>
             </Paper>
 
-            {/* --- TASK EXECUTION TRACKER --- */}
+            {/* --- TASK EXECUTION TRACKER (OPTIMIZED) --- */}
             <Paper sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
                 <Typography variant="subtitle2" fontWeight="bold" mb={1} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '14px' }}>TASK_EXECUTION_&_TRACKING</Typography>
                 <Typography variant="body2" color="text.secondary" mb={3} sx={{ fontSize: '12px' }}>Update status and dates. Syncs with Gantt Chart.</Typography>
@@ -373,41 +483,20 @@ export default function DailyLogTab({ project, projectBoqItems, resources, updat
                             </TableRow>
                         </TableHead>
                         <TableBody>
-                            {validTasks.map(task => {
-                                const isDone = task.status === "Completed";
-                                return (
-                                    <TableRow key={task.id} hover sx={{ bgcolor: isDone ? 'rgba(16, 185, 129, 0.05)' : 'inherit' }}>
-                                        <TableCell sx={{ fontWeight: 'bold', fontSize: '12px', whiteSpace: 'nowrap' }}>{task.name}</TableCell>
-                                        <TableCell sx={{ color: 'info.main', fontSize: '11px', whiteSpace: 'nowrap' }}>{task.phase}</TableCell>
-                                        <TableCell>
-                                            <TextField select size="small" fullWidth value={task.status || "Not Started"} onChange={e => handleTaskStatusChange(task.id, e.target.value)} InputProps={{ sx: { fontSize: '11px', height: 32, minWidth: '130px' } }}>
-                                                <MenuItem value="Not Started">Not Started</MenuItem>
-                                                <MenuItem value="In Progress" sx={{ color: 'info.main' }}>In Progress</MenuItem>
-                                                <MenuItem value="Completed" sx={{ color: 'success.main' }}>Completed</MenuItem>
-                                            </TextField>
-                                        </TableCell>
-                                        <TableCell>
-                                            <TextField type="date" size="small" fullWidth value={task.actualStart || ""} onChange={e => handleTaskDateChange(task.id, "actualStart", e.target.value)} InputProps={{ sx: { fontSize: '11px', height: 32, minWidth: '120px' } }} />
-                                        </TableCell>
-                                        <TableCell>
-                                            <TextField type="date" size="small" fullWidth value={task.actualEnd || ""} onChange={e => handleTaskDateChange(task.id, "actualEnd", e.target.value)} InputProps={{ sx: { fontSize: '11px', height: 32, minWidth: '120px' } }} />
-                                        </TableCell>
-                                    </TableRow>
-                                )
-                            })}
+                            {validTasks.map(task => (
+                                <TaskExecutionRow
+                                    key={task.id}
+                                    task={task}
+                                    updateTaskInline={updateTaskInline}
+                                />
+                            ))}
                         </TableBody>
                     </Table>
                 </TableContainer>
             </Paper>
 
             {/* CUSTOM RESOURCE DIALOG WITH ARIA FIX */}
-            <Dialog
-                open={isCustomOpen}
-                onClose={() => setIsCustomOpen(false)}
-                maxWidth="sm"
-                fullWidth
-                disableRestoreFocus
-            >
+            <Dialog open={isCustomOpen} onClose={() => setIsCustomOpen(false)} maxWidth="sm" fullWidth disableRestoreFocus>
                 <DialogTitle sx={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 'bold' }}>ADD_CUSTOM_RESOURCE</DialogTitle>
                 <DialogContent dividers sx={{ bgcolor: 'rgba(13, 31, 60, 0.5)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                     <TextField label="CODE" fullWidth value={customCode} onChange={e => setCustomCode(e.target.value)} />
