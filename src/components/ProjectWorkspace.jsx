@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import { exportProjectExcel } from "../utils/exportExcel";
-import { exportProjectPdf } from "../utils/exportPdf";
+import { exportProjectPdf, exportResourceTrackerPdf } from "../utils/exportPdf";
+import { getSelectedRate } from "../engines/calculationEngine";
 
 import { useProjectCalculations } from "../hooks/useProjectCalculations";
 import MasterBoqEditor from "./workspace/MasterBoqEditor";
@@ -259,6 +260,112 @@ export default function ProjectWorkspace({ projectId, onBack }) {
 
     const { renderedProjectBoq, totalAmount, projectResourceMap } = useProjectCalculations(projectBoqItems, masterBoqs, resources, project);
 
+    // Compute Resource Tracker state at workspace level for PDF exporting
+    const computedResourceTracker = useMemo(() => {
+        if (!project || !renderedProjectBoq) return {};
+        const tracker = {};
+        
+        // 1. Daily logs parsing
+        let safeDailyLogs = [];
+        if (project.dailyLogs) {
+            if (typeof project.dailyLogs === 'string') {
+                try { safeDailyLogs = JSON.parse(project.dailyLogs); } catch { }
+            } else {
+                safeDailyLogs = project.dailyLogs;
+            }
+        }
+
+        const autoActuals = {};
+        safeDailyLogs.forEach(log => {
+            if (!log.resourceId) return;
+            const key = `${log.phase || 'General'}_${log.resourceId}`;
+            autoActuals[key] = (autoActuals[key] || 0) + Number(log.qty || 0);
+        });
+
+        // 2. Manual actuals & brands
+        let manualActuals = {};
+        let selectedBrands = {};
+        let actualRes = project.actualResources;
+        if (typeof actualRes === 'string') {
+            try { actualRes = JSON.parse(actualRes); } catch { }
+        }
+        if (actualRes) {
+            Object.entries(actualRes).forEach(([k, v]) => {
+                if (k.startsWith('brand_')) {
+                    selectedBrands[k.substring(6)] = v;
+                } else {
+                    manualActuals[k] = v;
+                }
+            });
+        }
+
+        const trackingMode = project.resourceTrackingMode || 'manual';
+
+        renderedProjectBoq.forEach(item => {
+            const phase = item.phase || "General";
+            if (!tracker[phase]) tracker[phase] = {};
+
+            if (item.masterBoq && item.masterBoq.components) {
+                const components = typeof item.masterBoq.components === 'string' 
+                    ? JSON.parse(item.masterBoq.components) 
+                    : item.masterBoq.components;
+
+                components.forEach(comp => {
+                    if (comp.itemType === 'resource') {
+                        const resId = comp.itemId;
+                        const resourceData = resources.find(r => r.id === resId);
+
+                        if (resourceData) {
+                            const totalRequired = Number(comp.qty) * Number(item.computedQty || 0);
+
+                            if (!tracker[phase][resId]) {
+                                tracker[phase][resId] = {
+                                    code: resourceData.code,
+                                    description: resourceData.description,
+                                    unit: resourceData.unit,
+                                    estimatedQty: 0,
+                                    actualQty: trackingMode === 'auto' ? (autoActuals[`${phase}_${resId}`] || 0) : (manualActuals[`${phase}_${resId}`] || 0),
+                                    resourceData: resourceData
+                                };
+                            }
+                            tracker[phase][resId].estimatedQty += totalRequired;
+                        }
+                    }
+                });
+            }
+        });
+
+        // Inject any daily log items
+        safeDailyLogs.forEach(log => {
+            if (!log.resourceId) return;
+            const phase = log.phase || "General";
+            const resId = log.resourceId;
+            if (!tracker[phase]) tracker[phase] = {};
+
+            if (!tracker[phase][resId]) {
+                const resourceData = resources.find(r => r.id === resId);
+                if (resourceData) {
+                    tracker[phase][resId] = {
+                        code: resourceData.code,
+                        description: resourceData.description,
+                        unit: resourceData.unit,
+                        estimatedQty: 0,
+                        actualQty: trackingMode === 'auto' ? (autoActuals[`${phase}_${resId}`] || 0) : (manualActuals[`${phase}_${resId}`] || 0),
+                        resourceData: resourceData
+                    };
+                }
+            }
+        });
+
+        return { tracker, selectedBrands };
+    }, [project, renderedProjectBoq, resources]);
+
+    const handleExportResourceTracker = () => {
+        const { tracker, selectedBrands } = computedResourceTracker;
+        const activeRegionName = project?.region || "";
+        exportResourceTrackerPdf(project, tracker, activeRegionName, selectedBrands, getSelectedRate);
+    };
+
     const [formulaHelpOpen, setFormulaHelpOpen] = useState(false);
     const [editorItem, setEditorItem] = useState(null);
 
@@ -404,7 +511,10 @@ export default function ProjectWorkspace({ projectId, onBack }) {
 
                     <Box display="flex" gap={1.5} flexWrap="wrap" justifyContent={{ xs: 'flex-start', lg: 'flex-end' }}>
                         <Button variant="outlined" color="error" startIcon={<PictureAsPdfIcon />} onClick={() => exportProjectPdf(project, renderedProjectBoq, totalAmount)} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>
-                            PDF
+                            PROJECT ESTIMATE
+                        </Button>
+                        <Button variant="outlined" color="error" startIcon={<PictureAsPdfIcon />} onClick={handleExportResourceTracker} sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>
+                            RESOURCE TRACKER
                         </Button>
                         <Button variant="contained" color="success" startIcon={<DownloadIcon />} onClick={() => exportProjectExcel(project, renderedProjectBoq, masterBoqs, resources)} disableElevation sx={{ borderRadius: 50, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', height: '32px' }}>
                             EXCEL

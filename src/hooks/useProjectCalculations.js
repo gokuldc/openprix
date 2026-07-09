@@ -80,7 +80,7 @@ export function useProjectCalculations(projectBoqItems, masterBoqs, resources, p
                     if (project?.isPriceLocked && item.lockedRate !== null && item.lockedRate !== undefined) { 
                         rate = Number(item.lockedRate) || 0; 
                     } else { 
-                        const calculatedRate = calculateMasterBoqRate(masterBoq, resources, masterBoqs, project?.region);
+                        const calculatedRate = calculateMasterBoqRate(masterBoq, resources, masterBoqs, project?.region, new Set(), project);
                         rate = Number(calculatedRate) || Number(item.rate) || 0; 
                     }
                     displayCode = masterBoq.itemCode || "";

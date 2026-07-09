@@ -249,3 +249,113 @@ export const exportPoPdf = async (project, po) => {
 
     doc.save(`${project.code}_PO_${po.poNumber}.pdf`);
 };
+
+/**
+ * 04. EXPORT RESOURCE TRACKER REPORT
+ */
+export const exportResourceTrackerPdf = async (project, resourceTracker, selectedRegion, selectedBrands, getSelectedRate) => {
+    const company = await window.api.db.getSettings('company_info');
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+    const startY = await drawHeader(doc, company, `Resource Tracker: ${project.name}`);
+
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Code: ${project.code || 'N/A'}  |  Client: ${project.clientName || 'N/A'}`, 14, startY + 2);
+
+    let symbol = company?.currencySymbol || "Rs.";
+    if (symbol === '₹') symbol = 'Rs.';
+
+    let currentY = startY + 8;
+
+    for (const [phase, phaseData] of Object.entries(resourceTracker)) {
+        // Phase title
+        doc.setFontSize(11);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor(13, 31, 60);
+        doc.text(`PHASE: ${phase.toUpperCase()}`, 14, currentY);
+
+        let totalEstQty = 0;
+        let totalActQty = 0;
+        let totalEstCost = 0;
+        let totalActCost = 0;
+
+        const tableBody = Object.entries(phaseData).map(([resId, data]) => {
+            const resourceObj = data.resourceData;
+            const selectedBrand = selectedBrands[`${phase}_${resId}`] || "General";
+            const activeRegionName = selectedRegion || project?.region || "";
+            const rate = getSelectedRate(resourceObj, selectedBrands[`${phase}_${resId}`] || "", activeRegionName);
+            const variance = data.estimatedQty - data.actualQty;
+            const estCost = data.estimatedQty * rate;
+            const actualCost = data.actualQty * rate;
+
+            totalEstQty += Number(data.estimatedQty) || 0;
+            totalActQty += Number(data.actualQty) || 0;
+            totalEstCost += Number(estCost) || 0;
+            totalActCost += Number(actualCost) || 0;
+
+            return [
+                data.code || "-",
+                data.description || "",
+                data.unit || "-",
+                selectedBrand,
+                Number(rate).toFixed(2),
+                Number(data.estimatedQty).toFixed(2),
+                Number(data.actualQty).toFixed(2),
+                (variance > 0 ? "+" : "") + Number(variance).toFixed(2),
+                Number(estCost).toFixed(2),
+                Number(actualCost).toFixed(2)
+            ];
+        });
+
+        const totalVariance = totalEstQty - totalActQty;
+
+        // Append total row
+        tableBody.push([
+            "",
+            "TOTAL",
+            "",
+            "",
+            "",
+            totalEstQty.toFixed(2),
+            totalActQty.toFixed(2),
+            (totalVariance > 0 ? "+" : "") + totalVariance.toFixed(2),
+            totalEstCost.toFixed(2),
+            totalActCost.toFixed(2)
+        ]);
+
+        autoTable(doc, {
+            head: [["Code", "Description", "Unit", "Brand", `Rate (${symbol})`, "Est Qty", "Act Qty", "Variance", `Est Cost (${symbol})`, `Act Cost (${symbol})`]],
+            body: tableBody,
+            startY: currentY + 3,
+            margin: { left: 14, right: 14 },
+            theme: 'grid',
+            headStyles: { fillColor: [13, 31, 60], fontSize: 8 },
+            bodyStyles: { fontSize: 8 },
+            columnStyles: {
+                0: { cellWidth: 20 },
+                1: { cellWidth: 50 },
+                2: { cellWidth: 15 },
+                3: { cellWidth: 25 },
+                4: { halign: 'right' },
+                5: { halign: 'right' },
+                6: { halign: 'right' },
+                7: { halign: 'right' },
+                8: { halign: 'right' },
+                9: { halign: 'right' }
+            },
+            didParseCell: function (data) {
+                // If it is the last row (TOTAL row), make it bold
+                if (data.row.index === tableBody.length - 1) {
+                    data.cell.styles.fontStyle = 'bold';
+                    data.cell.styles.textColor = [16, 185, 129]; // Make totals stand out in green
+                }
+            }
+        });
+
+        currentY = doc.lastAutoTable.finalY + 10;
+    }
+
+    doc.save(`${project.code || 'Project'}_ResourceTracker.pdf`);
+};

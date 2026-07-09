@@ -1,3 +1,35 @@
+// Calculate selected rate (brand or region-wise general rate)
+export function getSelectedRate(resource, brandName, regionName) {
+    if (!resource) return 0;
+    let ratesObj = resource.rates;
+    if (typeof ratesObj === 'string') {
+        try { ratesObj = JSON.parse(ratesObj); } catch { return 0; }
+    }
+
+    if (brandName) {
+        const history = ratesObj.brandRatesHistory || {};
+        const sortedMonths = Object.keys(history).sort().reverse();
+        for (const month of sortedMonths) {
+            const monthData = history[month];
+            if (Array.isArray(monthData)) {
+                const brandData = monthData.find(b => b.brand === brandName);
+                if (brandData) {
+                    if (regionName && brandData[regionName] !== undefined && brandData[regionName] !== "") {
+                        const rate = Number(brandData[regionName]);
+                        if (rate > 0) return rate;
+                    }
+                    const availableBrandRates = Object.entries(brandData)
+                        .filter(([k, v]) => k !== 'brand' && !isNaN(Number(v)) && Number(v) > 0)
+                        .map(([k, v]) => Number(v));
+                    if (availableBrandRates.length > 0) return availableBrandRates[0];
+                }
+            }
+        }
+    }
+
+    return getResourceRate(resource, regionName);
+}
+
 export function getResourceRate(resource, regionName) {
     if (!resource || !resource.rates) return 0;
 
@@ -33,7 +65,7 @@ export function getResourceRate(resource, regionName) {
 }
 
 // 🔥 UPGRADED: Now processes formulas chronologically like the UI Editor!
-export function calculateMasterBoqRate(masterBoq, allResources, allMasterBoqs, regionName, visited = new Set()) {
+export function calculateMasterBoqRate(masterBoq, allResources, allMasterBoqs, regionName, visited = new Set(), project = null) {
     if (!masterBoq || !masterBoq.components) return 0;
 
     let components = masterBoq.components;
@@ -45,6 +77,25 @@ export function calculateMasterBoqRate(masterBoq, allResources, allMasterBoqs, r
     // Safety check to prevent infinite loops in nested BOQs
     if (visited.has(masterBoq.id)) return 0;
     visited.add(masterBoq.id);
+
+    // Extract selected brands from project actualResources
+    let selectedBrands = {};
+    if (project) {
+        let actualRes = project.actualResources;
+        if (typeof actualRes === 'string') {
+            try { actualRes = JSON.parse(actualRes); } catch { }
+        }
+        if (actualRes) {
+            Object.entries(actualRes).forEach(([k, v]) => {
+                if (k.startsWith('brand_')) {
+                    // key is brand_phase_resourceId, let's extract the resourceId suffix
+                    const parts = k.substring(6).split('_');
+                    const resourceId = parts[parts.length - 1];
+                    selectedBrands[resourceId] = v;
+                }
+            });
+        }
+    }
 
     let computedRows = [];
     let baseCost = 0;
@@ -83,10 +134,11 @@ export function calculateMasterBoqRate(masterBoq, allResources, allMasterBoqs, r
             let rate = 0;
             if (comp.itemType === 'resource') {
                 const resource = allResources.find(r => String(r.id) === String(comp.itemId));
-                rate = getResourceRate(resource, regionName);
+                const brandName = resource ? selectedBrands[resource.id] : null;
+                rate = getSelectedRate(resource, brandName, regionName);
             } else if (comp.itemType === 'boq') {
                 const nestedBoq = allMasterBoqs.find(b => String(b.id) === String(comp.itemId));
-                rate = calculateMasterBoqRate(nestedBoq, allResources, allMasterBoqs, regionName, new Set(visited));
+                rate = calculateMasterBoqRate(nestedBoq, allResources, allMasterBoqs, regionName, new Set(visited), project);
             }
 
             const amount = computedQty * rate;
@@ -100,8 +152,7 @@ export function calculateMasterBoqRate(masterBoq, allResources, allMasterBoqs, r
         }
     }
 
-    const overheadAmt = baseCost * ((Number(masterBoq.overhead) || 0) / 100);
-    const profitAmt = baseCost * ((Number(masterBoq.profit) || 0) / 100);
-
-    return baseCost + overheadAmt + profitAmt;
+    const ohPercent = Number(masterBoq.overhead) || 0;
+    const profitPercent = Number(masterBoq.profit) || 0;
+    return baseCost * (1 + ohPercent / 100 + profitPercent / 100);
 }
