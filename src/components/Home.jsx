@@ -110,6 +110,11 @@ export default function Home() {
 
     const networkMixData = useMemo(() => Object.entries(statsData.crm).map(([subject, A]) => ({ subject, A })), [statsData.crm]);
 
+    const localMarketResourcesCount = useMemo(() => {
+        const masterBoqCodes = new Set(masterBoqs.map(b => b.itemCode).filter(Boolean));
+        return resources.filter(r => !(r.code && masterBoqCodes.has(r.code))).length;
+    }, [resources, masterBoqs]);
+
     // 🔥 NEW: Extract and calculate metrics for ACTIVE projects only
     const activeProjectsList = useMemo(() => {
         return projects
@@ -191,7 +196,7 @@ export default function Home() {
 
                 <Typography variant="caption" sx={{ fontFamily: "'JetBrains Mono', monospace", opacity: 0.5, letterSpacing: '2px', display: 'block', mb: 1.5 }}>DATABASE_METRICS</Typography>
                 <Grid container spacing={2} sx={{ mb: 4 }}>
-                    <Grid item xs={6} sm={4} md={2}><StatTile title="Resources" value={resources.length} icon={<HandymanIcon fontSize="small" />} color="info" /></Grid>
+                    <Grid item xs={6} sm={4} md={2}><StatTile title="Resources" value={localMarketResourcesCount} icon={<HandymanIcon fontSize="small" />} color="info" /></Grid>
                     <Grid item xs={6} sm={4} md={2}><StatTile title="Assemblies" value={masterBoqs.length} icon={<AutoStoriesIcon fontSize="small" />} color="success" /></Grid>
                     <Grid item xs={6} sm={4} md={2}><StatTile title="Clients" value={statsData.crm.Client} icon={<GroupsIcon fontSize="small" />} color="secondary" /></Grid>
                     <Grid item xs={6} sm={4} md={2}><StatTile title="Suppliers" value={statsData.crm.Supplier} icon={<EngineeringIcon fontSize="small" />} color="warning" /></Grid>
