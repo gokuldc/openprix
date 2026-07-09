@@ -68,66 +68,171 @@ const loadPdfJs = () => {
     });
 };
 
-const parsePDFText = (text) => {
-    const rawLines = text.split('\n')
-        .map(l => l.trim())
-        .filter(l => {
-            if (!l) return false;
-            if (l === "No Spec") return false;
-            if (l.includes("Code Specification Rate")) return false;
-            if (l === "PRICE") return false;
-            if (l.match(/^Page \d+ of \d+/)) return false;
-            return true;
-        });
+const parsePDFItems = (allItems) => {
+    // 1. Determine column X coordinates using medians to handle variations safely
+    const potentialSpecCodes = allItems.filter(item => item.str.match(/^\d+\.\d+(?:\.\d+)*[a-zA-Z]*$/) && item.x < 150);
+    const specCodeXs = potentialSpecCodes.map(i => i.x).sort((a, b) => a - b);
+    const medianSpecCodeX = specCodeXs.length > 0 ? specCodeXs[Math.floor(specCodeXs.length / 2)] : 80;
 
-    const items = [];
-    let currentItem = null;
+    const potentialRates = allItems.filter(item => item.str.match(/^[\d,]+(?:\.\d+)?$/) && item.x > 350 && item.x < 550);
+    const rateXs = potentialRates.map(i => i.x).sort((a, b) => a - b);
+    const medianRateX = rateXs.length > 0 ? rateXs[Math.floor(rateXs.length / 2)] : 480;
 
-    rawLines.forEach(line => {
-        const matchStart = line.match(/^(\d+)\s+(\d+\.\d+(?:\.\d+)*)(?:\s+(.*))?$/);
-        if (matchStart) {
-            if (currentItem) {
-                items.push(currentItem);
+    const potentialUnits = allItems.filter(item => item.str.match(/^[a-zA-Z]+$/) && item.x > 450);
+    const unitXs = potentialUnits.map(i => i.x).sort((a, b) => a - b);
+    const medianUnitX = unitXs.length > 0 ? unitXs[Math.floor(unitXs.length / 2)] : 530;
+
+    const potentialNos = allItems.filter(item => item.str.match(/^\d+$/) && item.x < 80);
+    const noXs = potentialNos.map(i => i.x).sort((a, b) => a - b);
+    const medianNoX = noXs.length > 0 ? noXs[Math.floor(noXs.length / 2)] : 40;
+
+    // 2. Group items into Y-bands
+    const linesMap = {};
+    allItems.forEach(item => {
+        let foundKey = Object.keys(linesMap).find(k => Math.abs(Number(k) - item.y) <= 5);
+        if (!foundKey) {
+            foundKey = String(item.y);
+            linesMap[foundKey] = [];
+        }
+        linesMap[foundKey].push(item);
+    });
+
+    const sortedYKeys = Object.keys(linesMap).sort((a, b) => Number(a) - Number(b)); // top to bottom
+    const yBands = sortedYKeys.map(k => ({
+        y: Number(k),
+        items: linesMap[k].sort((a, b) => a.x - b.x)
+    }));
+
+    // 3. Find gap threshold for item separation
+    const gaps = [];
+    for (let i = 0; i < yBands.length - 1; i++) {
+        gaps.push(yBands[i + 1].y - yBands[i].y);
+    }
+    const validGaps = gaps.filter(g => g > 0).sort((a, b) => a - b);
+    const medianGap = validGaps.length > 0 ? validGaps[Math.floor(validGaps.length / 2)] : 15;
+    const gapThreshold = Math.max(medianGap * 1.8, 20);
+
+    // 4. Split into initial blocks by gap
+    const initialBlocks = [];
+    let currentBlock = { items: [] };
+    for (let i = 0; i < yBands.length; i++) {
+        currentBlock.items.push(...yBands[i].items);
+        if (i < yBands.length - 1) {
+            const gap = yBands[i + 1].y - yBands[i].y;
+            if (gap > gapThreshold) {
+                initialBlocks.push(currentBlock);
+                currentBlock = { items: [] };
             }
+        }
+    }
+    if (currentBlock.items.length > 0) initialBlocks.push(currentBlock);
 
-            let restText = matchStart[3] ? matchStart[3].trim() : "";
-            let rate = 0;
-            let unit = "each";
-
-            const matchEnd = restText.match(/^(.*?)\s+([\d,]+(?:\.\d+)?)\s+(\S+)$/);
-            if (matchEnd) {
-                restText = matchEnd[1].trim();
-                rate = Number(matchEnd[2].replace(/,/g, ''));
-                unit = matchEnd[3].trim();
-            }
-
-            currentItem = {
-                code: matchStart[2],
-                lines: restText ? [restText] : [],
-                rate: rate,
-                unit: unit
-            };
+    // 5. Merge blocks that don't have a Spec Code (e.g., page breaks)
+    const mergedBlocks = [];
+    for (let i = 0; i < initialBlocks.length; i++) {
+        const block = initialBlocks[i];
+        const hasSpecCode = block.items.some(item => item.str.match(/^\d+\.\d+(?:\.\d+)*[a-zA-Z]*$/) && Math.abs(item.x - medianSpecCodeX) < 40);
+        
+        if (hasSpecCode || mergedBlocks.length === 0) {
+            mergedBlocks.push(block);
         } else {
-            if (currentItem) {
-                currentItem.lines.push(line);
-            }
+            mergedBlocks[mergedBlocks.length - 1].items.push(...block.items);
+        }
+    }
+
+    // 6. Fallback: split block by midpoint if it contains multiple Spec Codes
+    const finalBlocks = [];
+    mergedBlocks.forEach(block => {
+        const specCodeItems = block.items.filter(item => item.str.match(/^\d+\.\d+(?:\.\d+)*[a-zA-Z]*$/) && Math.abs(item.x - medianSpecCodeX) < 40).sort((a, b) => a.y - b.y);
+        
+        if (specCodeItems.length <= 1) {
+            finalBlocks.push(block);
+        } else {
+            let currentSubBlock = { items: [] };
+            let currentSpecIdx = 0;
+            
+            const blockYBands = {};
+            block.items.forEach(item => {
+                let foundKey = Object.keys(blockYBands).find(k => Math.abs(Number(k) - item.y) <= 5);
+                if (!foundKey) {
+                    foundKey = String(item.y);
+                    blockYBands[foundKey] = [];
+                }
+                blockYBands[foundKey].push(item);
+            });
+            const sortedYs = Object.keys(blockYBands).sort((a, b) => Number(a) - Number(b));
+            
+            sortedYs.forEach(yStr => {
+                const y = Number(yStr);
+                if (currentSpecIdx < specCodeItems.length - 1) {
+                    const currentSpecY = specCodeItems[currentSpecIdx].y;
+                    const nextSpecY = specCodeItems[currentSpecIdx + 1].y;
+                    const midpoint = (currentSpecY + nextSpecY) / 2;
+                    
+                    if (y > midpoint) {
+                        finalBlocks.push(currentSubBlock);
+                        currentSubBlock = { items: [] };
+                        currentSpecIdx++;
+                    }
+                }
+                currentSubBlock.items.push(...blockYBands[yStr]);
+            });
+            finalBlocks.push(currentSubBlock);
         }
     });
 
-    if (currentItem) {
-        items.push(currentItem);
-    }
-
-    const processedItems = items.map(item => {
-        return {
-            itemCode: item.code,
-            description: item.lines.join(' ').trim(),
-            unit: item.unit,
-            rate: item.rate
-        };
+    // 7. Parse items from blocks
+    const parsedItems = [];
+    finalBlocks.forEach(block => {
+        if (block.items.length === 0) return;
+        
+        const specCodeItem = block.items.find(item => item.str.match(/^\d+\.\d+(?:\.\d+)*[a-zA-Z]*$/) && Math.abs(item.x - medianSpecCodeX) < 40);
+        if (!specCodeItem) return;
+        
+        const itemCode = specCodeItem.str;
+        
+        const rateItems = block.items.filter(item => item.str.match(/^[\d,]+(?:\.\d+)?$/) && Math.abs(item.x - medianRateX) < 40);
+        const rateItem = rateItems.length > 0 ? rateItems[0] : null;
+        const rate = rateItem ? Number(rateItem.str.replace(/,/g, '')) : 0;
+        
+        const unitItems = block.items.filter(item => item.str.match(/^[a-zA-Z]+$/) && Math.abs(item.x - medianUnitX) < 40);
+        const unitItem = unitItems.length > 0 ? unitItems[0] : null;
+        const unit = unitItem ? unitItem.str : "each";
+        
+        const noItem = block.items.find(item => item.str.match(/^\d+$/) && Math.abs(item.x - medianNoX) < 30);
+        
+        const specItems = block.items.filter(item => 
+            item !== specCodeItem && 
+            item !== rateItem && 
+            item !== unitItem && 
+            item !== noItem
+        );
+        
+        const specYMap = {};
+        specItems.forEach(item => {
+            let foundKey = Object.keys(specYMap).find(k => Math.abs(Number(k) - item.y) <= 5);
+            if (!foundKey) {
+                foundKey = String(item.y);
+                specYMap[foundKey] = [];
+            }
+            specYMap[foundKey].push(item);
+        });
+        
+        const sortedYKeys = Object.keys(specYMap).sort((a, b) => Number(a) - Number(b));
+        const specLines = sortedYKeys.map(yKey => {
+            const lineItems = specYMap[yKey].sort((a, b) => a.x - b.x);
+            return lineItems.map(item => item.str).join(" ");
+        });
+        
+        parsedItems.push({
+            itemCode: itemCode,
+            description: specLines.join(' ').trim(),
+            unit: unit,
+            rate: rate
+        });
     });
 
-    return processedItems;
+    return parsedItems;
 };
 
 const Resizer = ({ onMouseDown }) => (
@@ -399,50 +504,42 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                 const arrayBuffer = event.target.result;
                 const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-                let fullText = "";
+                let allItems = [];
                 for (let i = 1; i <= pdf.numPages; i++) {
                     const page = await pdf.getPage(i);
                     const textContent = await page.getTextContent();
 
-                    const linesMap = {};
                     textContent.items.forEach(item => {
-                        if (!item.str.trim()) return;
-                        const y = Math.round(item.transform[5]);
-                        let foundKey = Object.keys(linesMap).find(k => Math.abs(Number(k) - y) <= 5);
-                        if (!foundKey) {
-                            foundKey = String(y);
-                            linesMap[foundKey] = [];
-                        }
-                        linesMap[foundKey].push(item);
-                    });
+                        const text = item.str.trim();
+                        if (!text) return;
+                        
+                        if (text === "No" || text === "Spec" || text === "Code" || text === "Specification" || text === "Rate(₹)" || text === "Unit" || text === "PRICE") return;
+                        if (text.match(/^Page \d+ of \d+/)) return;
+                        if (text.includes("Code Specification Rate")) return;
+                        if (text === "No Spec") return;
 
-                    const sortedYKeys = Object.keys(linesMap).sort((a, b) => Number(b) - Number(a));
-                    const pageLines = sortedYKeys.map(yKey => {
-                        const lineItems = linesMap[yKey].sort((a, b) => a.transform[4] - b.transform[4]);
-                        return lineItems.map(item => item.str).join(" ");
+                        // PDF coordinates are bottom-up. Create a top-down continuous global Y coordinate.
+                        const globalY = (pdf.numPages - i) * 2000 + item.transform[5];
+                        
+                        allItems.push({
+                            str: text,
+                            x: item.transform[4],
+                            y: globalY,
+                            originalY: item.transform[5]
+                        });
                     });
-
-                    fullText += pageLines.join("\n") + "\n";
                 }
 
-                // Check for required format columns
-                const lowerText = fullText.toLowerCase();
-                const hasRequiredHeaders = (lowerText.includes("no") || lowerText.includes("sl")) &&
-                    (lowerText.includes("spec") || lowerText.includes("code")) &&
-                    lowerText.includes("specification") &&
-                    (lowerText.includes("rate") || lowerText.includes("price")) &&
-                    (lowerText.includes("unit") || lowerText.includes("unlt"));
-
-                if (!hasRequiredHeaders) {
+                if (allItems.length === 0) {
                     setUploadStatus({
                         active: true,
                         status: 'error',
-                        message: "Invalid format! The PDF must contain 'No', 'Spec Code', 'Specification', 'Rate(₹)', and 'Unit' columns."
+                        message: "No text found in the PDF. Please check the format."
                     });
                     return;
                 }
 
-                const parsedItems = parsePDFText(fullText);
+                const parsedItems = parsePDFItems(allItems);
                 if (parsedItems.length === 0) {
                     setUploadStatus({
                         active: true,
@@ -534,106 +631,106 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
     return (
         <Box sx={{ width: '100%', overflow: 'hidden' }}>
             <Typography variant="h6" fontWeight="bold" mb={3} sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: '16px' }}>DATABOOK_ASSEMBLIES</Typography>
-                <Box display="flex" flexDirection="column" gap={2} sx={{ width: '100%', mb: 3 }}>
-                    {/* Top Row: Template and Import Excel Buttons on the right side */}
-                    <Box display="flex" gap={2} alignItems="center" justifyContent="flex-end">
-                        <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={generateDatabookTemplate} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>TEMPLATE</Button>
-                        <input type="file" accept=".xls,.xlsx" ref={excelInputRef} style={{ display: 'none' }} onChange={(e) => { handleDatabookExcelUpload(e); excelInputRef.current.value = null; }} />
-                        <input type="file" accept=".pdf" ref={pdfInputRef} style={{ display: 'none' }} onChange={(e) => { handlePdfUpload(e); pdfInputRef.current.value = null; }} />
-                        <Button size="small" variant="contained" disableElevation startIcon={<UploadIcon />} onClick={() => excelInputRef.current.click()} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>IMPORT EXCEL</Button>
-                    </Box>
+            <Box display="flex" flexDirection="column" gap={2} sx={{ width: '100%', mb: 3 }}>
+                {/* Top Row: Template and Import Excel Buttons on the right side */}
+                <Box display="flex" gap={2} alignItems="center" justifyContent="flex-end">
+                    <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={generateDatabookTemplate} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>TEMPLATE</Button>
+                    <input type="file" accept=".xls,.xlsx" ref={excelInputRef} style={{ display: 'none' }} onChange={(e) => { handleDatabookExcelUpload(e); excelInputRef.current.value = null; }} />
+                    <input type="file" accept=".pdf" ref={pdfInputRef} style={{ display: 'none' }} onChange={(e) => { handlePdfUpload(e); pdfInputRef.current.value = null; }} />
+                    <Button size="small" variant="contained" disableElevation startIcon={<UploadIcon />} onClick={() => excelInputRef.current.click()} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>IMPORT EXCEL</Button>
+                </Box>
 
-                    {/* Bottom Row: Filters (Search, Category) & Upload/Add Entry buttons */}
-                    <Box display="flex" alignItems="center" flexWrap="wrap" gap={2}>
-                        <TextField placeholder="Search Code..." variant="outlined" size="small" value={searchCode} onChange={(e) => { setSearchCode(e.target.value); setPage(0); }} sx={{ flex: 1, minWidth: 150 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                        <TextField placeholder="Search Description..." variant="outlined" size="small" value={searchDesc} onChange={(e) => { setSearchDesc(e.target.value); setPage(0); }} sx={{ flex: 2, minWidth: 250 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                {/* Bottom Row: Filters (Search, Category) & Upload/Add Entry buttons */}
+                <Box display="flex" alignItems="center" flexWrap="wrap" gap={2}>
+                    <TextField placeholder="Search Code..." variant="outlined" size="small" value={searchCode} onChange={(e) => { setSearchCode(e.target.value); setPage(0); }} sx={{ flex: 1, minWidth: 150 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                    <TextField placeholder="Search Description..." variant="outlined" size="small" value={searchDesc} onChange={(e) => { setSearchDesc(e.target.value); setPage(0); }} sx={{ flex: 2, minWidth: 250 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
 
-                        <TextField
-                            select
+                    <TextField
+                        select
+                        size="small"
+                        label="CATEGORY"
+                        value={selectedCategory}
+                        onChange={(e) => {
+                            if (e.target.value === "__ADD_CATEGORY__") {
+                                setCategoryModalOpen(true);
+                            } else {
+                                setSelectedCategory(e.target.value);
+                                setPage(0);
+                            }
+                        }}
+                        sx={{ flex: 1.5, minWidth: 200 }}
+                        InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }}
+                        InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}
+                        SelectProps={{
+                            renderValue: (selected) => selected || "---select---"
+                        }}
+                    >
+                        <MenuItem value="" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>---select---</MenuItem>
+                        <MenuItem value="__ADD_CATEGORY__" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: '#8b5cf6', fontWeight: 'bold' }}>+ Add Category</MenuItem>
+                        {categories.map(cat => {
+                            const isCustom = !STATIC_CATEGORIES.includes(cat);
+                            return (
+                                <MenuItem
+                                    key={cat}
+                                    value={cat}
+                                    sx={{
+                                        fontFamily: "'JetBrains Mono', monospace",
+                                        fontSize: '12px',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        width: '100%',
+                                        minWidth: '240px'
+                                    }}
+                                >
+                                    <span>{cat}</span>
+                                    {isCustom && (
+                                        <IconButton
+                                            size="small"
+                                            color="error"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setCategoryToDelete(cat);
+                                                setDeleteCategoryModalOpen(true);
+                                            }}
+                                            sx={{ p: 0.5, ml: 2 }}
+                                        >
+                                            <DeleteIcon sx={{ fontSize: 16 }} />
+                                        </IconButton>
+                                    )}
+                                </MenuItem>
+                            );
+                        })}
+                    </TextField>
+
+                    <Box display="flex" gap={2} alignItems="center" flexWrap="wrap" sx={{ ml: 'auto' }}>
+                        <Button size="small" variant="contained" color="secondary" disableElevation startIcon={<UploadIcon />} onClick={() => { if (!selectedCategory) { alert("Please select a category first!"); return; } pdfInputRef.current.click(); }} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)', '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' } }}>UPLOAD ASSEMBLY</Button>
+
+                        <Button
                             size="small"
-                            label="CATEGORY"
-                            value={selectedCategory}
-                            onChange={(e) => {
-                                if (e.target.value === "__ADD_CATEGORY__") {
-                                    setCategoryModalOpen(true);
-                                } else {
-                                    setSelectedCategory(e.target.value);
-                                    setPage(0);
+                            variant="contained"
+                            onClick={() => {
+                                if (!selectedCategory) {
+                                    alert("Please select a category first!");
+                                    return;
                                 }
+                                setAddEntryModalOpen(true);
                             }}
-                            sx={{ flex: 1.5, minWidth: 200 }}
-                            InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }}
-                            InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}
-                            SelectProps={{
-                                renderValue: (selected) => selected || "---select---"
+                            sx={{
+                                height: 40,
+                                px: 3,
+                                borderRadius: 2,
+                                fontFamily: "'JetBrains Mono', monospace",
+                                fontSize: '11px',
+                                background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)',
+                                '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' }
                             }}
                         >
-                            <MenuItem value="" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>---select---</MenuItem>
-                            <MenuItem value="__ADD_CATEGORY__" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: '#8b5cf6', fontWeight: 'bold' }}>+ Add Category</MenuItem>
-                            {categories.map(cat => {
-                                const isCustom = !STATIC_CATEGORIES.includes(cat);
-                                return (
-                                    <MenuItem
-                                        key={cat}
-                                        value={cat}
-                                        sx={{
-                                            fontFamily: "'JetBrains Mono', monospace",
-                                            fontSize: '12px',
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            width: '100%',
-                                            minWidth: '240px'
-                                        }}
-                                    >
-                                        <span>{cat}</span>
-                                        {isCustom && (
-                                            <IconButton
-                                                size="small"
-                                                color="error"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setCategoryToDelete(cat);
-                                                    setDeleteCategoryModalOpen(true);
-                                                }}
-                                                sx={{ p: 0.5, ml: 2 }}
-                                            >
-                                                <DeleteIcon sx={{ fontSize: 16 }} />
-                                            </IconButton>
-                                        )}
-                                    </MenuItem>
-                                );
-                            })}
-                        </TextField>
-
-                        <Box display="flex" gap={2} alignItems="center" flexWrap="wrap" sx={{ ml: 'auto' }}>
-                            <Button size="small" variant="contained" color="secondary" disableElevation startIcon={<UploadIcon />} onClick={() => { if (!selectedCategory) { alert("Please select a category first!"); return; } pdfInputRef.current.click(); }} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)', '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' } }}>UPLOAD ASSEMBLY</Button>
-
-                            <Button
-                                size="small"
-                                variant="contained"
-                                onClick={() => {
-                                    if (!selectedCategory) {
-                                        alert("Please select a category first!");
-                                        return;
-                                    }
-                                    setAddEntryModalOpen(true);
-                                }}
-                                sx={{
-                                    height: 40,
-                                    px: 3,
-                                    borderRadius: 2,
-                                    fontFamily: "'JetBrains Mono', monospace",
-                                    fontSize: '11px',
-                                    background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)',
-                                    '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' }
-                                }}
-                            >
-                                + ADD DATABOOK ENTRY
-                            </Button>
-                        </Box>
+                            + ADD DATABOOK ENTRY
+                        </Button>
                     </Box>
                 </Box>
+            </Box>
 
             <TableContainer component={Paper} elevation={0} variant="outlined" sx={{ overflowX: 'auto', width: '100%', borderRadius: '8px 8px 0 0', border: '1px solid', borderColor: 'divider', borderBottom: 'none', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
                 <Table size="small" sx={{ tableLayout: 'fixed', minWidth: '100%', width: Object.values(colWidths).reduce((a, b) => a + b, 0) }}>

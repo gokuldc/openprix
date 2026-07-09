@@ -12,8 +12,6 @@ import { exportResourceTrackerPdf } from '../../utils/exportPdf';
 export default function ResourceTrackerTab({ project, renderedProjectBoq, resources, regions = [], updateProject }) {
     const { formatCurrency } = useSettings();
 
-    const [selectedRegion, setSelectedRegion] = useState(project?.region || "");
-
     // Safely parse tracking mode
     const trackingMode = project?.resourceTrackingMode || 'manual';
 
@@ -45,8 +43,8 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
         let actuals = {};
         let brands = {};
         if (typeof project?.actualResources === 'string') {
-            try { 
-                const parsed = JSON.parse(project.actualResources); 
+            try {
+                const parsed = JSON.parse(project.actualResources);
                 Object.entries(parsed).forEach(([k, v]) => {
                     if (k.startsWith('brand_')) {
                         brands[k.substring(6)] = v;
@@ -69,15 +67,15 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
 
     const resourceTracker = useMemo(() => {
         const tracker = {};
-        
+
         // Pass 1: Add all estimated resources from the BOQ recipes
         renderedProjectBoq.forEach(item => {
             const phase = item.phase || "General";
             if (!tracker[phase]) tracker[phase] = {};
 
             if (item.masterBoq && item.masterBoq.components) {
-                const components = typeof item.masterBoq.components === 'string' 
-                    ? JSON.parse(item.masterBoq.components) 
+                const components = typeof item.masterBoq.components === 'string'
+                    ? JSON.parse(item.masterBoq.components)
                     : item.masterBoq.components;
 
                 components.forEach(comp => {
@@ -132,7 +130,7 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
 
     const updateActualResource = async (phase, resourceId, val) => {
         if (trackingMode === 'auto') return;
-        
+
         let currentActuals = {};
         if (typeof project?.actualResources === 'string') {
             try { currentActuals = JSON.parse(project.actualResources); } catch { }
@@ -235,32 +233,9 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
                             : "Actual quantities are entered manually in the table below."}
                     </Typography>
                 </Box>
-                
-                {/* REGION SELECTION DROPDOWN */}
-                <Box display="flex" alignItems="center" gap={3} flexWrap="wrap">
-                    <TextField
-                        select
-                        size="small"
-                        label="VIEW REGION"
-                        value={selectedRegion}
-                        onChange={(e) => setSelectedRegion(e.target.value)}
-                        sx={{ 
-                            minWidth: 160, 
-                            fontFamily: "'JetBrains Mono', monospace",
-                            '& .MuiInputBase-input': { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }
-                        }}
-                        InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }}
-                    >
-                        <MenuItem value="" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
-                            <em>-- Default ({project?.region || 'None'}) --</em>
-                        </MenuItem>
-                        {regions.map(r => (
-                            <MenuItem key={r.id} value={r.name} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
-                                {r.name}
-                            </MenuItem>
-                        ))}
-                    </TextField>
 
+                {/* REGION SELECTION DROPDOWN REMOVED - Using project's cost region */}
+                <Box display="flex" alignItems="center" gap={3} flexWrap="wrap">
                     <FormControlLabel
                         control={<Switch checked={trackingMode === 'auto'} onChange={toggleMode} color="success" />}
                         label={<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', fontWeight: 'bold' }}>AUTO_SYNC</Typography>}
@@ -297,7 +272,7 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
                                     const resourceObj = data.resourceData;
                                     const selectedBrand = selectedBrands[`${phase}_${resId}`] || "";
                                     const availableBrands = getResourceBrands(resourceObj);
-                                    const activeRegionName = selectedRegion || project?.region || "";
+                                    const activeRegionName = project?.region || "";
                                     const rate = getSelectedRate(resourceObj, selectedBrand, activeRegionName);
                                     const variance = data.estimatedQty - data.actualQty;
                                     const estCost = data.estimatedQty * rate;
@@ -306,8 +281,8 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
                                     return (
                                         <TableRow key={resId} sx={{ '& td': { px: 1, py: 0.5, borderBottom: '1px solid rgba(255,255,255,0.05)' } }}>
                                             <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{data.code}</TableCell>
-                                            <TableCell sx={{ 
-                                                fontFamily: "'JetBrains Mono', monospace", 
+                                            <TableCell sx={{
+                                                fontFamily: "'JetBrains Mono', monospace",
                                                 fontSize: '12px',
                                                 maxWidth: '180px',
                                                 overflow: 'hidden',
@@ -324,9 +299,9 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
                                                     value={selectedBrand}
                                                     onChange={(e) => updateSelectedBrand(phase, resId, e.target.value)}
                                                     displayEmpty
-                                                    sx={{ 
-                                                        fontFamily: "'JetBrains Mono', monospace", 
-                                                        fontSize: '11px', 
+                                                    sx={{
+                                                        fontFamily: "'JetBrains Mono', monospace",
+                                                        fontSize: '11px',
                                                         minWidth: 100,
                                                         height: 26,
                                                         bgcolor: 'rgba(255,255,255,0.03)'

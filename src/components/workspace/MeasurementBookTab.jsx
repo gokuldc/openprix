@@ -123,8 +123,27 @@ const MeasurementBookCard = ({ item, projectId, updateBoqMutation, setFormulaHel
                     </Typography>
                 </Box>
                 <Button
-                    variant="outlined" size="small" fullWidth={{ xs: true, sm: false }} startIcon={<HelpOutlineIcon />}
-                    onClick={() => setFormulaHelpOpen(true)} sx={{ py: 0.5, fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}
+                    variant="outlined"
+                    size="small"
+                    color="secondary"
+                    fullWidth={{ xs: true, sm: false }}
+                    startIcon={<HelpOutlineIcon sx={{ fontSize: 14 }} />}
+                    onClick={() => setFormulaHelpOpen(true)}
+                    sx={{
+                        py: 0.5,
+                        px: 1.5,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: '11px',
+                        borderRadius: '20px',
+                        textTransform: 'uppercase',
+                        minWidth: '150px',
+                        height: '32px',
+                        borderColor: 'secondary.main',
+                        '&:hover': {
+                            borderColor: 'secondary.light',
+                            bgcolor: 'rgba(156, 39, 176, 0.08)'
+                        }
+                    }}
                 >
                     FORMULA GUIDE
                 </Button>
