@@ -1,15 +1,19 @@
 import React, { useState, useMemo } from 'react';
 import {
     Box, Paper, Typography, Table, TableBody, TableCell, TableContainer,
-    TableHead, TableRow, Switch, FormControlLabel, Select, MenuItem, TextField, Button
+    TableHead, TableRow, Switch, FormControlLabel, Select, MenuItem, TextField, Button, useTheme
 } from '@mui/material';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import { getResourceTrackerTabStyles, getNativeStyles } from './ResourceTrackerTab.styles';
 import { tableInputActiveStyle } from '../../styles';
 import { getResourceRate } from '../../engines/calculationEngine';
 import { useSettings } from '../../context/SettingsContext';
 import { exportResourceTrackerPdf } from '../../utils/exportPdf';
 
-export default function ResourceTrackerTab({ project, renderedProjectBoq, resources, regions = [], updateProject }) {
+export default function ResourceTrackerTab({ project, renderedProjectBoq, resources, regions = [], updateProject, masterBoqs = [] }) {
+    const theme = useTheme();
+    const styles = getResourceTrackerTabStyles(theme);
+    const nativeStyles = getNativeStyles(tableInputActiveStyle);
     const { formatCurrency } = useSettings();
 
     // Safely parse tracking mode
@@ -67,6 +71,7 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
 
     const resourceTracker = useMemo(() => {
         const tracker = {};
+        const masterBoqCodes = new Set((masterBoqs || []).map(b => b.itemCode).filter(Boolean));
 
         // Pass 1: Add all estimated resources from the BOQ recipes
         renderedProjectBoq.forEach(item => {
@@ -83,7 +88,7 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
                         const resId = comp.itemId;
                         const resourceData = resources.find(r => r.id === resId);
 
-                        if (resourceData) {
+                        if (resourceData && !masterBoqCodes.has(resourceData.code)) {
                             const totalRequired = Number(comp.qty) * Number(item.computedQty || 0);
 
                             if (!tracker[phase][resId]) {
@@ -112,7 +117,7 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
 
             if (!tracker[phase][resId]) {
                 const resourceData = resources.find(r => r.id === resId);
-                if (resourceData) {
+                if (resourceData && !masterBoqCodes.has(resourceData.code)) {
                     tracker[phase][resId] = {
                         code: resourceData.code,
                         description: resourceData.description,
@@ -126,7 +131,7 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
         });
 
         return tracker;
-    }, [renderedProjectBoq, resources, manualActuals, trackingMode, autoActuals, safeDailyLogs]);
+    }, [renderedProjectBoq, resources, manualActuals, trackingMode, autoActuals, safeDailyLogs, masterBoqs]);
 
     const updateActualResource = async (phase, resourceId, val) => {
         if (trackingMode === 'auto') return;
@@ -211,8 +216,8 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
 
     if (Object.keys(resourceTracker).length === 0) {
         return (
-            <Paper sx={{ p: 4, textAlign: "center", borderRadius: 2, bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
-                <Typography color="text.secondary" sx={{ fontFamily: "'JetBrains Mono', monospace" }}>
+            <Paper sx={styles.noResourcesPaper}>
+                <Typography color="text.secondary" sx={styles.noResourcesText}>
                     No resources found. Add Databook Items to the BOQ or submit Daily Logs first.
                 </Typography>
             </Paper>
@@ -222,12 +227,12 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
     return (
         <Box display="flex" flexDirection="column" gap={4}>
             {/* MODE TOGGLE BANNER */}
-            <Paper sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)', flexWrap: 'wrap', gap: 2 }}>
+            <Paper sx={styles.toggleBannerPaper}>
                 <Box>
-                    <Typography variant="subtitle1" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                    <Typography variant="subtitle1" fontWeight="bold" sx={styles.toggleTitle}>
                         TRACKING_MODE: {trackingMode.toUpperCase()}
                     </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
+                    <Typography variant="body2" color="text.secondary" sx={styles.toggleDesc}>
                         {trackingMode === 'auto'
                             ? "Actual quantities are automatically synced from the Daily Site Logs."
                             : "Actual quantities are entered manually in the table below."}
@@ -238,33 +243,33 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
                 <Box display="flex" alignItems="center" gap={3} flexWrap="wrap">
                     <FormControlLabel
                         control={<Switch checked={trackingMode === 'auto'} onChange={toggleMode} color="success" />}
-                        label={<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', fontWeight: 'bold' }}>AUTO_SYNC</Typography>}
+                        label={<Typography sx={styles.switchLabel}>AUTO_SYNC</Typography>}
                         labelPlacement="start"
                     />
                 </Box>
             </Paper>
 
             {Object.keys(resourceTracker).map(phase => (
-                <Paper key={phase} elevation={0} sx={{ overflow: "hidden", borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
-                    <Box sx={{ bgcolor: "rgba(0,0,0,0.2)", p: 2, borderBottom: "1px solid", borderColor: "divider" }}>
-                        <Typography variant="subtitle1" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.5px' }}>
+                <Paper key={phase} elevation={0} sx={styles.phasePaper}>
+                    <Box sx={styles.phaseHeaderBox}>
+                        <Typography variant="subtitle1" fontWeight="bold" sx={styles.phaseTitle}>
                             PHASE: {phase.toUpperCase()}
                         </Typography>
                     </Box>
                     <TableContainer>
                         <Table size="small">
-                            <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.2)' }}>
-                                <TableRow sx={{ '& th': { px: 1, py: 1, borderBottom: '1px solid rgba(255,255,255,0.1)' } }}>
-                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>CODE</TableCell>
-                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>RESOURCE_DESCRIPTION</TableCell>
-                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>UNIT</TableCell>
-                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'primary.main' }}>BRAND</TableCell>
-                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'primary.main' }}>RATE</TableCell>
-                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'info.main' }}>ESTIMATED_QTY</TableCell>
-                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: trackingMode === 'auto' ? 'success.main' : 'warning.main' }}>ACTUAL_CONSUMED</TableCell>
-                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>VARIANCE</TableCell>
-                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'success.main' }}>ESTIMATED_COST</TableCell>
-                                    <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'success.main' }}>ACTUAL_COST</TableCell>
+                            <TableHead sx={styles.tableHead}>
+                                <TableRow sx={styles.thRow}>
+                                    <TableCell sx={styles.thCell}>CODE</TableCell>
+                                    <TableCell sx={styles.thCell}>RESOURCE_DESCRIPTION</TableCell>
+                                    <TableCell sx={styles.thCell}>UNIT</TableCell>
+                                    <TableCell sx={styles.thCellBrand}>BRAND</TableCell>
+                                    <TableCell sx={styles.thCellRate}>RATE</TableCell>
+                                    <TableCell sx={styles.thCellEstQty}>ESTIMATED_QTY</TableCell>
+                                    <TableCell sx={styles.thCellActQty(trackingMode)}>ACTUAL_CONSUMED</TableCell>
+                                    <TableCell sx={styles.thCell}>VARIANCE</TableCell>
+                                    <TableCell sx={styles.thCellCost}>ESTIMATED_COST</TableCell>
+                                    <TableCell sx={styles.thCellCost}>ACTUAL_COST</TableCell>
                                 </TableRow>
                             </TableHead>
                             <TableBody>
@@ -279,51 +284,38 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
                                     const actualCost = data.actualQty * rate;
 
                                     return (
-                                        <TableRow key={resId} sx={{ '& td': { px: 1, py: 0.5, borderBottom: '1px solid rgba(255,255,255,0.05)' } }}>
-                                            <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{data.code}</TableCell>
-                                            <TableCell sx={{
-                                                fontFamily: "'JetBrains Mono', monospace",
-                                                fontSize: '12px',
-                                                maxWidth: '180px',
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis',
-                                                whiteSpace: 'nowrap'
-                                            }} title={data.description}>
+                                        <TableRow key={resId} sx={styles.tbRow}>
+                                            <TableCell sx={styles.tdCell}>{data.code}</TableCell>
+                                            <TableCell sx={styles.tdCellDesc} title={data.description}>
                                                 {data.description}
-                                                {data.estimatedQty === 0 && <Typography component="span" variant="caption" color="error.main" ml={0.5} sx={{ fontSize: '9px' }}>(Unplanned)</Typography>}
+                                                {data.estimatedQty === 0 && <Typography component="span" variant="caption" color="error.main" ml={0.5} sx={styles.unplannedText}>(Unplanned)</Typography>}
                                             </TableCell>
-                                            <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{data.unit}</TableCell>
+                                            <TableCell sx={styles.tdCell}>{data.unit}</TableCell>
                                             <TableCell>
                                                 <Select
                                                     size="small"
                                                     value={selectedBrand}
                                                     onChange={(e) => updateSelectedBrand(phase, resId, e.target.value)}
                                                     displayEmpty
-                                                    sx={{
-                                                        fontFamily: "'JetBrains Mono', monospace",
-                                                        fontSize: '11px',
-                                                        minWidth: 100,
-                                                        height: 26,
-                                                        bgcolor: 'rgba(255,255,255,0.03)'
-                                                    }}
+                                                    sx={styles.brandSelect}
                                                 >
-                                                    <MenuItem value="" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>
+                                                    <MenuItem value="" sx={styles.brandMenuItem}>
                                                         <em>General</em>
                                                     </MenuItem>
                                                     {availableBrands.map(b => (
-                                                        <MenuItem key={b} value={b} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>
+                                                        <MenuItem key={b} value={b} sx={styles.brandMenuItem}>
                                                             {b}
                                                         </MenuItem>
                                                     ))}
                                                 </Select>
                                             </TableCell>
-                                            <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: selectedBrand ? 'primary.main' : 'inherit' }}>
+                                            <TableCell sx={styles.tdCellRateVal(selectedBrand)}>
                                                 {Number(rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </TableCell>
-                                            <TableCell sx={{ fontWeight: 'bold', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{data.estimatedQty.toFixed(2)}</TableCell>
+                                            <TableCell sx={styles.tdCellEstQtyVal}>{data.estimatedQty.toFixed(2)}</TableCell>
                                             <TableCell>
                                                 {trackingMode === 'auto' ? (
-                                                    <Typography sx={{ fontWeight: 'bold', color: 'success.main', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', px: 0.5 }}>
+                                                    <Typography sx={styles.tdCellActQtyAuto}>
                                                         {data.actualQty.toFixed(2)}
                                                     </Typography>
                                                 ) : (
@@ -331,17 +323,17 @@ export default function ResourceTrackerTab({ project, renderedProjectBoq, resour
                                                         type="number"
                                                         value={data.actualQty || ""}
                                                         onChange={(e) => updateActualResource(phase, resId, e.target.value)}
-                                                        style={{ ...tableInputActiveStyle, padding: '2px 4px', fontSize: '12px' }}
+                                                        style={nativeStyles.actualQtyInput}
                                                     />
                                                 )}
                                             </TableCell>
-                                            <TableCell sx={{ fontWeight: 'bold', color: variance < 0 ? 'error.main' : 'success.main', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
+                                            <TableCell sx={styles.tdCellVariance(variance)}>
                                                 {variance > 0 ? "+" : ""}{variance.toFixed(2)}
                                             </TableCell>
-                                            <TableCell sx={{ fontWeight: 'bold', color: 'success.main', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
+                                            <TableCell sx={styles.tdCellCostVal}>
                                                 {Number(estCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </TableCell>
-                                            <TableCell sx={{ fontWeight: 'bold', color: 'success.main', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
+                                            <TableCell sx={styles.tdCellCostVal}>
                                                 {Number(actualCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </TableCell>
                                         </TableRow>

@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from "react";
-import { Box, Button, Typography, Paper, TextField, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, TableSortLabel, InputAdornment, Pagination, IconButton, Backdrop, CircularProgress } from "@mui/material";
+import { Box, Button, Typography, Paper, TextField, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, TableSortLabel, InputAdornment, Pagination, IconButton, Backdrop, CircularProgress, useTheme } from "@mui/material";
 import SearchIcon from '@mui/icons-material/Search';
 import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/Upload';
@@ -10,7 +10,7 @@ import * as XLSX from "xlsx";
 import AddCategoryModal from "./AddCategoryModal";
 import ConfirmDeleteCategoryModal from "./ConfirmDeleteCategoryModal";
 import AddDatabookEntryModal from "./AddDatabookEntryModal";
-
+import { getResizerStyle, getViewBoqTabStyles } from "./ViewBoqTab.styles";
 const STATIC_CATEGORIES = [
     "2. Earth Work",
     "3. Mortars",
@@ -236,10 +236,12 @@ const parsePDFItems = (allItems) => {
 };
 
 const Resizer = ({ onMouseDown }) => (
-    <div onMouseDown={onMouseDown} style={{ display: 'inline-block', width: '10px', height: '100%', position: 'absolute', right: 0, top: 0, cursor: 'col-resize', zIndex: 1, backgroundColor: 'transparent', transition: 'background-color 0.2s' }} onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(59, 130, 246, 0.2)'} onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'} />
+    <div onMouseDown={onMouseDown} style={getResizerStyle()} onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(59, 130, 246, 0.2)'} onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'} />
 );
 
 export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, deleteMasterBoq, loadData }) {
+    const theme = useTheme();
+    const styles = getViewBoqTabStyles(theme);
     const [searchCode, setSearchCode] = useState('');
     const [searchDesc, setSearchDesc] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('');
@@ -629,21 +631,21 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
     const endEntry = Math.min((page + 1) * rowsPerPage, processedBOQs.length);
 
     return (
-        <Box sx={{ width: '100%', overflow: 'hidden' }}>
-            <Typography variant="h6" fontWeight="bold" mb={3} sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px', fontSize: '16px' }}>DATABOOK_ASSEMBLIES</Typography>
-            <Box display="flex" flexDirection="column" gap={2} sx={{ width: '100%', mb: 3 }}>
+        <Box sx={styles.mainContainer}>
+            <Typography variant="h6" fontWeight="bold" mb={3} sx={styles.headerTitle}>DATABOOK_ASSEMBLIES</Typography>
+            <Box display="flex" flexDirection="column" gap={2} sx={styles.subContainer}>
                 {/* Top Row: Template and Import Excel Buttons on the right side */}
                 <Box display="flex" gap={2} alignItems="center" justifyContent="flex-end">
-                    <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={generateDatabookTemplate} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>TEMPLATE</Button>
+                    <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={generateDatabookTemplate} sx={styles.actionButton}>TEMPLATE</Button>
                     <input type="file" accept=".xls,.xlsx" ref={excelInputRef} style={{ display: 'none' }} onChange={(e) => { handleDatabookExcelUpload(e); excelInputRef.current.value = null; }} />
                     <input type="file" accept=".pdf" ref={pdfInputRef} style={{ display: 'none' }} onChange={(e) => { handlePdfUpload(e); pdfInputRef.current.value = null; }} />
-                    <Button size="small" variant="contained" disableElevation startIcon={<UploadIcon />} onClick={() => excelInputRef.current.click()} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>IMPORT EXCEL</Button>
+                    <Button size="small" variant="contained" disableElevation startIcon={<UploadIcon />} onClick={() => excelInputRef.current.click()} sx={styles.actionButton}>IMPORT EXCEL</Button>
                 </Box>
 
                 {/* Bottom Row: Filters (Search, Category) & Upload/Add Entry buttons */}
                 <Box display="flex" alignItems="center" flexWrap="wrap" gap={2}>
-                    <TextField placeholder="Search Code..." variant="outlined" size="small" value={searchCode} onChange={(e) => { setSearchCode(e.target.value); setPage(0); }} sx={{ flex: 1, minWidth: 150 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                    <TextField placeholder="Search Description..." variant="outlined" size="small" value={searchDesc} onChange={(e) => { setSearchDesc(e.target.value); setPage(0); }} sx={{ flex: 2, minWidth: 250 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                    <TextField placeholder="Search Code..." variant="outlined" size="small" value={searchCode} onChange={(e) => { setSearchCode(e.target.value); setPage(0); }} sx={styles.searchCodeField} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: styles.searchInputProps }} />
+                    <TextField placeholder="Search Description..." variant="outlined" size="small" value={searchDesc} onChange={(e) => { setSearchDesc(e.target.value); setPage(0); }} sx={styles.searchDescField} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: styles.searchInputProps }} />
 
                     <TextField
                         select
@@ -658,30 +660,22 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                                 setPage(0);
                             }
                         }}
-                        sx={{ flex: 1.5, minWidth: 200 }}
-                        InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }}
-                        InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}
+                        sx={styles.categorySelect}
+                        InputLabelProps={{ sx: styles.categoryInputLabel }}
+                        InputProps={{ sx: styles.searchInputProps }}
                         SelectProps={{
                             renderValue: (selected) => selected || "---select---"
                         }}
                     >
-                        <MenuItem value="" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>---select---</MenuItem>
-                        <MenuItem value="__ADD_CATEGORY__" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: '#8b5cf6', fontWeight: 'bold' }}>+ Add Category</MenuItem>
+                        <MenuItem value="" sx={styles.menuItemDefault}>---select---</MenuItem>
+                        <MenuItem value="__ADD_CATEGORY__" sx={styles.menuItemAdd}>+ Add Category</MenuItem>
                         {categories.map(cat => {
                             const isCustom = !STATIC_CATEGORIES.includes(cat);
                             return (
                                 <MenuItem
                                     key={cat}
                                     value={cat}
-                                    sx={{
-                                        fontFamily: "'JetBrains Mono', monospace",
-                                        fontSize: '12px',
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center',
-                                        width: '100%',
-                                        minWidth: '240px'
-                                    }}
+                                    sx={styles.menuItemCustom}
                                 >
                                     <span>{cat}</span>
                                     {isCustom && (
@@ -693,7 +687,7 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                                                 setCategoryToDelete(cat);
                                                 setDeleteCategoryModalOpen(true);
                                             }}
-                                            sx={{ p: 0.5, ml: 2 }}
+                                            sx={styles.deleteIconBtn}
                                         >
                                             <DeleteIcon sx={{ fontSize: 16 }} />
                                         </IconButton>
@@ -703,8 +697,8 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                         })}
                     </TextField>
 
-                    <Box display="flex" gap={2} alignItems="center" flexWrap="wrap" sx={{ ml: 'auto' }}>
-                        <Button size="small" variant="contained" color="secondary" disableElevation startIcon={<UploadIcon />} onClick={() => { if (!selectedCategory) { alert("Please select a category first!"); return; } pdfInputRef.current.click(); }} sx={{ height: 40, px: 3, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)', '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' } }}>UPLOAD ASSEMBLY</Button>
+                    <Box display="flex" gap={2} alignItems="center" flexWrap="wrap" sx={styles.actionsWrapper}>
+                        <Button size="small" variant="contained" color="secondary" disableElevation startIcon={<UploadIcon />} onClick={() => { if (!selectedCategory) { alert("Please select a category first!"); return; } pdfInputRef.current.click(); }} sx={styles.primaryGradientButton}>UPLOAD ASSEMBLY</Button>
 
                         <Button
                             size="small"
@@ -716,15 +710,7 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                                 }
                                 setAddEntryModalOpen(true);
                             }}
-                            sx={{
-                                height: 40,
-                                px: 3,
-                                borderRadius: 2,
-                                fontFamily: "'JetBrains Mono', monospace",
-                                fontSize: '11px',
-                                background: 'linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%)',
-                                '&:hover': { background: 'linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%)' }
-                            }}
+                            sx={styles.primaryGradientButton}
                         >
                             + ADD DATABOOK ENTRY
                         </Button>
@@ -732,14 +718,14 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                 </Box>
             </Box>
 
-            <TableContainer component={Paper} elevation={0} variant="outlined" sx={{ overflowX: 'auto', width: '100%', borderRadius: '8px 8px 0 0', border: '1px solid', borderColor: 'divider', borderBottom: 'none', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
-                <Table size="small" sx={{ tableLayout: 'fixed', minWidth: '100%', width: Object.values(colWidths).reduce((a, b) => a + b, 0) }}>
-                    <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.3)' }}>
+            <TableContainer component={Paper} elevation={0} variant="outlined" sx={styles.tableContainer}>
+                <Table size="small" sx={styles.table(Object.values(colWidths).reduce((a, b) => a + b, 0))}>
+                    <TableHead sx={styles.tableHead}>
                         <TableRow>
-                            <TableCell sx={{ width: colWidths.code, position: 'relative', overflow: 'visible', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}><TableSortLabel active={true} direction={sortDirection} onClick={handleSortToggle}><strong>ITEM_CODE</strong></TableSortLabel><Resizer onMouseDown={handleResizeStart('code')} /></TableCell>
-                            <TableCell sx={{ width: colWidths.desc, position: 'relative', overflow: 'visible', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}><strong>DESCRIPTION</strong><Resizer onMouseDown={handleResizeStart('desc')} /></TableCell>
-                            <TableCell sx={{ width: colWidths.unit, position: 'relative', overflow: 'visible', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}><strong>UNIT</strong><Resizer onMouseDown={handleResizeStart('unit')} /></TableCell>
-                            <TableCell align="center" sx={{ width: colWidths.actions, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}><strong>ACTIONS</strong></TableCell>
+                            <TableCell sx={styles.headerCellCode(colWidths.code)}><TableSortLabel active={true} direction={sortDirection} onClick={handleSortToggle}><strong>ITEM_CODE</strong></TableSortLabel><Resizer onMouseDown={handleResizeStart('code')} /></TableCell>
+                            <TableCell sx={styles.headerCellDesc(colWidths.desc)}><strong>DESCRIPTION</strong><Resizer onMouseDown={handleResizeStart('desc')} /></TableCell>
+                            <TableCell sx={styles.headerCellUnit(colWidths.unit)}><strong>UNIT</strong><Resizer onMouseDown={handleResizeStart('unit')} /></TableCell>
+                            <TableCell align="center" sx={styles.headerCellActions(colWidths.actions)}><strong>ACTIONS</strong></TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
@@ -747,29 +733,20 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                             paginatedBOQs.map((b) => {
                                 return (
                                     <TableRow key={b.id} hover>
-                                        <TableCell sx={{ fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{b.itemCode || '-'}</TableCell>
-                                        <TableCell sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{b.description}</TableCell>
-                                        <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{b.unit}</TableCell>
-                                        <TableCell align="center"><Box display="flex" gap={1} justifyContent="center"><Button size="small" variant="outlined" color="warning" onClick={() => onEditBoq(b)} sx={{ borderRadius: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>EDIT</Button><Button size="small" variant="outlined" color="error" onClick={() => deleteMasterBoq(b.id, `${b.itemCode} - ${b.description}`)} sx={{ borderRadius: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' }}>DELETE</Button></Box></TableCell>
+                                        <TableCell sx={styles.bodyCellCode}>{b.itemCode || '-'}</TableCell>
+                                        <TableCell sx={styles.bodyCellDesc}>{b.description}</TableCell>
+                                        <TableCell sx={styles.bodyCellUnit}>{b.unit}</TableCell>
+                                        <TableCell align="center"><Box display="flex" gap={1} justifyContent="center"><Button size="small" variant="outlined" color="warning" onClick={() => onEditBoq(b)} sx={styles.editButton}>EDIT</Button><Button size="small" variant="outlined" color="error" onClick={() => deleteMasterBoq(b.id, `${b.itemCode} - ${b.description}`)} sx={styles.deleteButton}>DELETE</Button></Box></TableCell>
                                     </TableRow>
                                 );
                             })
-                        ) : (<TableRow><TableCell colSpan={4} align="center" sx={{ py: 3, fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', color: 'text.secondary' }}>NO_MATCHING_ITEMS</TableCell></TableRow>)}
+                        ) : (<TableRow><TableCell colSpan={4} align="center" sx={styles.noItemsCell}>NO_MATCHING_ITEMS</TableCell></TableRow>)}
                     </TableBody>
                 </Table>
             </TableContainer>
 
-            <Box display="flex" justifyContent="space-between" alignItems="center" sx={{
-                p: 2,
-                bgcolor: 'rgba(13, 31, 60, 0.3)',
-                border: '1px solid',
-                borderColor: 'divider',
-                borderTop: 'none',
-                borderRadius: '0 0 8px 8px',
-                flexDirection: { xs: 'column', sm: 'row' },
-                gap: 2
-            }}>
-                <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontWeight: 500 }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" sx={styles.paginationContainer}>
+                <Typography variant="caption" sx={styles.paginationText}>
                     SHOWING {startEntry}–{endEntry} OF {processedBOQs.length} ENTRIES
                 </Typography>
                 <Pagination
@@ -780,22 +757,7 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                     size="medium"
                     showFirstButton
                     showLastButton
-                    sx={{
-                        '& .MuiPaginationItem-root': {
-                            fontFamily: "'JetBrains Mono', monospace",
-                            fontSize: '12px',
-                            color: 'text.secondary',
-                            '&.Mui-selected': {
-                                background: 'linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)',
-                                color: '#fff',
-                                fontWeight: 'bold',
-                                boxShadow: '0 2px 8px rgba(37, 99, 235, 0.4)',
-                                '&:hover': {
-                                    background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
-                                }
-                            }
-                        }
-                    }}
+                    sx={styles.paginationControl}
                 />
             </Box>
 
@@ -824,31 +786,23 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
 
             {/* EXCEL/PDF UPLOAD PROGRESS OVERLAY */}
             <Backdrop
-                sx={{
-                    color: '#fff',
-                    zIndex: (theme) => theme.zIndex.drawer + 9999,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 3,
-                    background: 'rgba(5, 10, 20, 0.85)',
-                    backdropFilter: 'blur(10px)',
-                }}
+                sx={styles.backdrop}
                 open={uploadStatus.active}
             >
                 {uploadStatus.status === 'success' ? (
-                    <CheckCircleOutlineIcon sx={{ fontSize: 60, color: '#00e676' }} />
+                    <CheckCircleOutlineIcon sx={styles.successIcon} />
                 ) : uploadStatus.status === 'error' ? (
-                    <ErrorOutlineIcon sx={{ fontSize: 60, color: '#ff1744' }} />
+                    <ErrorOutlineIcon sx={styles.errorIcon} />
                 ) : (
                     <CircularProgress color="primary" size={60} thickness={4} />
                 )}
 
-                <Box textAlign="center" sx={{ maxWidth: 400, width: '90%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 'bold', mb: 1, letterSpacing: '1px' }}>
+                <Box textAlign="center" sx={styles.uploadBox}>
+                    <Typography variant="h6" sx={styles.uploadTitle}>
                         {uploadStatus.status === 'success' ? "IMPORT SUCCESSFUL" : uploadStatus.status === 'error' ? "IMPORT FAILED" : "PROCESSING_DATA"}
                     </Typography>
 
-                    <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'rgba(255,255,255,0.6)', mb: 2, whiteSpace: 'pre-line' }}>
+                    <Typography variant="body2" sx={styles.uploadSubtitle}>
                         {uploadStatus.status === 'success' || uploadStatus.status === 'error'
                             ? uploadStatus.message
                             : "Processing document assemblies, please wait..."}
@@ -859,7 +813,7 @@ export default function ViewBoqTab({ masterBoqs, regions, resources, onEditBoq, 
                             variant="contained"
                             color={uploadStatus.status === 'success' ? "primary" : "error"}
                             onClick={() => setUploadStatus(prev => ({ ...prev, active: false }))}
-                            sx={{ mt: 3, borderRadius: 50, px: 5, fontFamily: "'JetBrains Mono', monospace" }}
+                            sx={styles.uploadCloseBtn}
                         >
                             Close
                         </Button>

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import ReactDOM from 'react-dom'; // 🔥 REQUIRED FOR PORTALS
 import {
     Box, Typography, Button, Paper, TextField, MenuItem, Autocomplete,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, InputAdornment, Alert
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, InputAdornment, Alert, useTheme
 } from "@mui/material";
 
 // Icons
@@ -14,6 +14,7 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import SearchIcon from '@mui/icons-material/Search';
 
 import { tableInputStyle } from "../../styles";
+import { getBoqBuilderTabStyles, getNativeStyles } from "./BoqBuilderTab.styles";
 import { useSettings } from '../../context/SettingsContext';
 
 // 🔥 REACT QUERY & POINTER DND
@@ -67,6 +68,8 @@ const CATEGORIES = [
 // 🧩 SUB-COMPONENT 1: THE ADD FORM (Standard)
 // ============================================================================
 const BoqAddForm = ({ projectId, projectBoqItems, masterBoqs, saveBoqMutation }) => {
+    const theme = useTheme();
+    const styles = getBoqBuilderTabStyles(theme);
     const [addMode, setAddMode] = useState("master");
     const [searchCode, setSearchCode] = useState("");
     const [searchDesc, setSearchDesc] = useState("");
@@ -121,17 +124,17 @@ const BoqAddForm = ({ projectId, projectBoqItems, masterBoqs, saveBoqMutation })
 
     return (
         <Box>
-            <Box sx={{ display: "flex", flexDirection: { xs: 'column', sm: 'row' }, gap: 2, mb: 3 }}>
-                <Button variant={addMode === "master" ? "contained" : "outlined"} onClick={() => setAddMode("master")} sx={{ borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>MASTER_DATABASE</Button>
-                <Button variant={addMode === "custom" ? "contained" : "outlined"} onClick={() => setAddMode("custom")} color="secondary" sx={{ borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>CUSTOM_AD_HOC</Button>
+            <Box sx={styles.addModeBtnsBox}>
+                <Button variant={addMode === "master" ? "contained" : "outlined"} onClick={() => setAddMode("master")} sx={styles.modeBtn}>MASTER_DATABASE</Button>
+                <Button variant={addMode === "custom" ? "contained" : "outlined"} onClick={() => setAddMode("custom")} color="secondary" sx={styles.modeBtn}>CUSTOM_AD_HOC</Button>
             </Box>
 
-            <Box sx={{ p: { xs: 2, sm: 3 }, bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 2, border: '1px solid', borderColor: 'divider', mb: 3 }}>
+            <Box sx={styles.formPaper}>
                 {addMode === "master" ? (
                     <Box display="flex" flexDirection="column" gap={2}>
                         <Box display="flex" gap={2} flexDirection={{ xs: 'column', md: 'row' }}>
-                            <TextField fullWidth size="small" placeholder="Search Code..." value={searchCode} onChange={e => setSearchCode(e.target.value)} sx={{ flex: 1 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                            <TextField fullWidth size="small" placeholder="Search Description..." value={searchDesc} onChange={e => setSearchDesc(e.target.value)} sx={{ flex: 1.5 }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                            <TextField fullWidth size="small" placeholder="Search Code..." value={searchCode} onChange={e => setSearchCode(e.target.value)} sx={styles.searchCodeInput} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: styles.searchInputProps }} />
+                            <TextField fullWidth size="small" placeholder="Search Description..." value={searchDesc} onChange={e => setSearchDesc(e.target.value)} sx={styles.searchDescInput} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>, sx: styles.searchInputProps }} />
                             <TextField
                                 select
                                 fullWidth
@@ -139,40 +142,40 @@ const BoqAddForm = ({ projectId, projectBoqItems, masterBoqs, saveBoqMutation })
                                 label="CATEGORY"
                                 value={selectedCategory}
                                 onChange={e => setSelectedCategory(e.target.value)}
-                                sx={{ flex: 1.2 }}
-                                InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }}
-                                InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}
+                                sx={styles.selectCategory}
+                                InputLabelProps={{ sx: styles.searchLabelProps }}
+                                InputProps={{ sx: styles.searchInputProps }}
                             >
-                                <MenuItem value="" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>---select---</MenuItem>
+                                <MenuItem value="" sx={styles.selectMenuItem}>---select---</MenuItem>
                                 {CATEGORIES.map(cat => (
-                                    <MenuItem key={cat} value={cat} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{cat}</MenuItem>
+                                    <MenuItem key={cat} value={cat} sx={styles.selectMenuItem}>{cat}</MenuItem>
                                 ))}
                             </TextField>
                         </Box>
-                        <TextField select fullWidth size="small" label="SELECT_ITEM" value={addBoqId} onChange={e => setAddBoqId(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }}>
+                        <TextField select fullWidth size="small" label="SELECT_ITEM" value={addBoqId} onChange={e => setAddBoqId(e.target.value)} InputLabelProps={{ sx: styles.searchLabelProps }} InputProps={{ sx: styles.searchInputProps }}>
                             <MenuItem value="">-- CHOOSE_MASTER_BOQ --</MenuItem>
-                            {filteredMasterBoqs.map(b => <MenuItem key={b.id} value={b.id} sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', whiteSpace: 'normal' }}>{b.itemCode ? `[${b.itemCode}] ` : ''}{b.description}</MenuItem>)}
+                            {filteredMasterBoqs.map(b => <MenuItem key={b.id} value={b.id} sx={styles.selectMasterBoqItem}>{b.itemCode ? `[${b.itemCode}] ` : ''}{b.description}</MenuItem>)}
                         </TextField>
                         <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }}>
-                            <TextField fullWidth size="small" type="text" label="QTY OR FORMULA" value={addBoqQty} onChange={e => setAddBoqQty(e.target.value)} placeholder="e.g. 50 or =#1*10" InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                            <Autocomplete freeSolo fullWidth options={availablePhases} value={activePhase} onChange={(_, newVal) => setActivePhase(newVal || "General")} onInputChange={(_, newVal) => setActivePhase(newVal || "General")} renderInput={(params) => <TextField {...params} size="small" label="PHASE" InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ ...params.InputProps, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />} />
-                            <Button variant="contained" fullWidth onClick={submitMaster} startIcon={<AddIcon />} sx={{ height: 40, flexShrink: 0, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', width: { xs: '100%', sm: 'auto' } }}>ADD</Button>
+                            <TextField fullWidth size="small" type="text" label="QTY OR FORMULA" value={addBoqQty} onChange={e => setAddBoqQty(e.target.value)} placeholder="e.g. 50 or =#1*10" InputLabelProps={{ sx: styles.searchLabelProps }} InputProps={{ sx: styles.searchInputProps }} />
+                            <Autocomplete freeSolo fullWidth options={availablePhases} value={activePhase} onChange={(_, newVal) => setActivePhase(newVal || "General")} onInputChange={(_, newVal) => setActivePhase(newVal || "General")} renderInput={(params) => <TextField {...params} size="small" label="PHASE" InputLabelProps={{ sx: styles.searchLabelProps }} InputProps={{ ...params.InputProps, sx: styles.searchInputProps }} />} />
+                            <Button variant="contained" fullWidth onClick={submitMaster} startIcon={<AddIcon />} sx={styles.addBtn}>ADD</Button>
                         </Box>
                     </Box>
                 ) : (
                     <Box display="flex" flexDirection="column" gap={2}>
                         <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }}>
-                            <TextField fullWidth size="small" label="CODE" value={customCode} onChange={e => setCustomCode(e.target.value)} sx={{ flex: 1 }} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                            <TextField fullWidth size="small" label="DESCRIPTION" value={customDesc} onChange={e => setCustomDesc(e.target.value)} sx={{ flex: 3 }} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                            <TextField fullWidth size="small" label="CODE" value={customCode} onChange={e => setCustomCode(e.target.value)} sx={styles.customCodeInput} InputLabelProps={{ sx: styles.searchLabelProps }} InputProps={{ sx: styles.searchInputProps }} />
+                            <TextField fullWidth size="small" label="DESCRIPTION" value={customDesc} onChange={e => setCustomDesc(e.target.value)} sx={styles.customDescInput} InputLabelProps={{ sx: styles.searchLabelProps }} InputProps={{ sx: styles.searchInputProps }} />
                         </Box>
                         <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }}>
-                            <TextField fullWidth size="small" label="UNIT" value={customUnit} onChange={e => setCustomUnit(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                            <TextField fullWidth size="small" type="number" label="RATE" value={customRate} onChange={e => setCustomRate(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
-                            <TextField fullWidth size="small" type="number" label="QTY" value={customQty} onChange={e => setCustomQty(e.target.value)} InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />
+                            <TextField fullWidth size="small" label="UNIT" value={customUnit} onChange={e => setCustomUnit(e.target.value)} InputLabelProps={{ sx: styles.searchLabelProps }} InputProps={{ sx: styles.searchInputProps }} />
+                            <TextField fullWidth size="small" type="number" label="RATE" value={customRate} onChange={e => setCustomRate(e.target.value)} InputLabelProps={{ sx: styles.searchLabelProps }} InputProps={{ sx: styles.searchInputProps }} />
+                            <TextField fullWidth size="small" type="number" label="QTY" value={customQty} onChange={e => setCustomQty(e.target.value)} InputLabelProps={{ sx: styles.searchLabelProps }} InputProps={{ sx: styles.searchInputProps }} />
                         </Box>
                         <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }}>
-                            <Autocomplete freeSolo fullWidth options={availablePhases} value={activePhase} onChange={(_, newVal) => setActivePhase(newVal || "General")} onInputChange={(_, newVal) => setActivePhase(newVal || "General")} renderInput={(params) => <TextField {...params} size="small" label="PHASE" InputLabelProps={{ sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '11px' } }} InputProps={{ ...params.InputProps, sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' } }} />} />
-                            <Button variant="contained" color="secondary" fullWidth onClick={submitCustom} startIcon={<AddIcon />} sx={{ height: 40, flexShrink: 0, borderRadius: 2, fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', width: { xs: '100%', sm: 'auto' } }}>ADD_CUSTOM</Button>
+                            <Autocomplete freeSolo fullWidth options={availablePhases} value={activePhase} onChange={(_, newVal) => setActivePhase(newVal || "General")} onInputChange={(_, newVal) => setActivePhase(newVal || "General")} renderInput={(params) => <TextField {...params} size="small" label="PHASE" InputLabelProps={{ sx: styles.searchLabelProps }} InputProps={{ ...params.InputProps, sx: styles.searchInputProps }} />} />
+                            <Button variant="contained" color="secondary" fullWidth onClick={submitCustom} startIcon={<AddIcon />} sx={styles.addBtn}>ADD_CUSTOM</Button>
                         </Box>
                     </Box>
                 )}
@@ -185,6 +188,9 @@ const BoqAddForm = ({ projectId, projectBoqItems, masterBoqs, saveBoqMutation })
 // 🧩 SUB-COMPONENT 2: THE ROW (WITH PORTAL & FIXED WIDTHS)
 // ============================================================================
 const BoqTableRow = ({ item, formatCurrency, provided, snapshot, updateBoqMutation, deleteBoq, openEditDialog, projectId }) => {
+    const theme = useTheme();
+    const styles = getBoqBuilderTabStyles(theme);
+    const nativeStyles = getNativeStyles(item, tableInputStyle);
     const [localFormula, setLocalFormula] = useState(item.formulaStr !== undefined ? item.formulaStr : item.qty);
     const [isFocused, setIsFocused] = useState(false);
 
@@ -213,18 +219,14 @@ const BoqTableRow = ({ item, formatCurrency, provided, snapshot, updateBoqMutati
                 maxWidth: usePortal ? '90vw' : 'none',
                 zIndex: 9999
             }}
-            sx={{
-                bgcolor: snapshot.isDragging ? '#1a2e4c' : (item.isCustom ? 'rgba(34, 211, 238, 0.03)' : 'inherit'),
-                boxShadow: snapshot.isDragging ? '0 15px 30px rgba(0,0,0,0.8)' : 'none',
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
-            }}
+            sx={styles.rowDraggable(snapshot, item)}
         >
             {/* 🔥 FIXED WIDTHS: Prevents the "Twitch" during drag start */}
-            <TableCell {...provided.dragHandleProps} sx={{ width: 40, p: 0, textAlign: 'center' }}><DragIndicatorIcon fontSize="small" /></TableCell>
-            <TableCell sx={{ width: 60, fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{item.slNo}</TableCell>
-            <TableCell sx={{ width: 100, fontWeight: 'bold', color: item.isCustom ? 'secondary.main' : 'inherit', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{item.displayCode || "-"}</TableCell>
-            <TableCell sx={{ minWidth: 250, fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{item.displayDesc}</TableCell>
-            <TableCell sx={{ width: 160 }}>
+            <TableCell {...provided.dragHandleProps} sx={styles.dragHandleCell}><DragIndicatorIcon fontSize="small" /></TableCell>
+            <TableCell sx={styles.slNoCell}>{item.slNo}</TableCell>
+            <TableCell sx={styles.codeCell(item)}>{item.displayCode || "-"}</TableCell>
+            <TableCell sx={styles.descCell}>{item.displayDesc}</TableCell>
+            <TableCell sx={styles.qtyCellBox}>
                 <input
                     type="text"
                     value={item.hasMBook ? Number(item.computedQty || 0).toFixed(2) : (isFocused ? localFormula : Number(item.computedQty || 0).toFixed(2))}
@@ -232,13 +234,13 @@ const BoqTableRow = ({ item, formatCurrency, provided, snapshot, updateBoqMutati
                     onBlur={handleBlur}
                     onChange={e => setLocalFormula(e.target.value)}
                     disabled={item.hasMBook}
-                    style={{ ...tableInputStyle, width: '100%', background: item.hasMBook ? "var(--mui-palette-action-disabledBackground)" : tableInputStyle.background }}
+                    style={nativeStyles.qtyInputNative}
                 />
             </TableCell>
-            <TableCell sx={{ width: 80, fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{item.displayUnit}</TableCell>
-            <TableCell sx={{ width: 120, fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{formatCurrency(Number(item.rate) || 0)}</TableCell>
-            <TableCell sx={{ width: 140, fontWeight: 'bold', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>{formatCurrency(Number(item.amount) || 0)}</TableCell>
-            <TableCell align="center" sx={{ width: 100 }}>
+            <TableCell sx={styles.unitCell}>{item.displayUnit}</TableCell>
+            <TableCell sx={styles.rateCell}>{formatCurrency(Number(item.rate) || 0)}</TableCell>
+            <TableCell sx={styles.amountCell}>{formatCurrency(Number(item.amount) || 0)}</TableCell>
+            <TableCell align="center" sx={styles.actionCell}>
                 <Box display="flex" gap={0.5} justifyContent="center">
                     <IconButton color="warning" onClick={() => openEditDialog(item)} size="small"><EditIcon fontSize="small" /></IconButton>
                     <IconButton color="error" onClick={() => deleteBoq(item.id)} size="small"><DeleteIcon fontSize="small" /></IconButton>
@@ -258,6 +260,8 @@ const BoqTableRow = ({ item, formatCurrency, provided, snapshot, updateBoqMutati
 // 🚀 MAIN COMPONENT
 // ============================================================================
 export default function BoqBuilderTab({ projectId, openEditDialog, setFormulaHelpOpen }) {
+    const theme = useTheme();
+    const styles = getBoqBuilderTabStyles(theme);
     const { formatCurrency } = useSettings();
     const { data: rawProject } = useProject(projectId);
     const { data: rawMasterBoqs = [] } = useMasterBoqs();
@@ -333,36 +337,36 @@ export default function BoqBuilderTab({ projectId, openEditDialog, setFormulaHel
     };
 
     return (
-        <Paper sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(13, 31, 60, 0.5)' }}>
+        <Paper sx={styles.mainPaper}>
             <BoqAddForm projectId={projectId} projectBoqItems={projectBoqItems} masterBoqs={masterBoqs} saveBoqMutation={saveBoqMutation} />
 
-            <Alert severity="info" sx={{ mb: 3, fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
+            <Alert severity="info" sx={styles.alertBox}>
                 <Box>💡 Drag the grip icon (⋮⋮) to reorder items or move them between phases.</Box>
             </Alert>
 
             <DragDropContext onDragEnd={handleOnDragEnd}>
-                <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, overflowX: 'auto' }}>
-                    <Table size="small" sx={{ minWidth: 1000, tableLayout: 'fixed' }}>
-                        <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.3)' }}>
+                <TableContainer sx={styles.tableContainer}>
+                    <Table size="small" sx={styles.table}>
+                        <TableHead sx={styles.tableHead}>
                             <TableRow>
-                                <TableCell sx={{ width: 40 }}></TableCell>
-                                <TableCell sx={{ width: 60, fontFamily: "'JetBrains Mono', monospace" }}>SL.NO</TableCell>
-                                <TableCell sx={{ width: 100, fontFamily: "'JetBrains Mono', monospace" }}>CODE</TableCell>
-                                <TableCell sx={{ minWidth: 250, fontFamily: "'JetBrains Mono', monospace" }}>DESCRIPTION</TableCell>
-                                <TableCell sx={{ width: 160, fontFamily: "'JetBrains Mono', monospace" }}>QUANTITY</TableCell>
-                                <TableCell sx={{ width: 80, fontFamily: "'JetBrains Mono', monospace" }}>UNIT</TableCell>
-                                <TableCell sx={{ width: 120, fontFamily: "'JetBrains Mono', monospace" }}>UNIT_RATE</TableCell>
-                                <TableCell sx={{ width: 140, fontFamily: "'JetBrains Mono', monospace" }}>TOTAL</TableCell>
-                                <TableCell align="center" sx={{ width: 100 }}>ACTION</TableCell>
+                                <TableCell sx={styles.thCell(40)}></TableCell>
+                                <TableCell sx={styles.thCell(60)}>SL.NO</TableCell>
+                                <TableCell sx={styles.thCell(100)}>CODE</TableCell>
+                                <TableCell sx={{ minWidth: 250, ...styles.thCellAuto }}>DESCRIPTION</TableCell>
+                                <TableCell sx={styles.thCell(160)}>QUANTITY</TableCell>
+                                <TableCell sx={styles.thCell(80)}>UNIT</TableCell>
+                                <TableCell sx={styles.thCell(120)}>UNIT_RATE</TableCell>
+                                <TableCell sx={styles.thCell(140)}>TOTAL</TableCell>
+                                <TableCell align="center" sx={styles.thCell(100)}>ACTION</TableCell>
                             </TableRow>
                         </TableHead>
 
                         {Object.entries(groupedBoq).map(([phaseName, phaseItems]) => (
                             <React.Fragment key={`phase-${phaseName}`}>
                                 <TableBody>
-                                    <TableRow sx={{ bgcolor: 'rgba(59, 130, 246, 0.1)' }}>
-                                        <TableCell colSpan={9} sx={{ py: 1.5, borderBottom: '1px solid rgba(59, 130, 246, 0.3)' }}>
-                                            <Typography variant="subtitle2" color="primary.main" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                                    <TableRow sx={styles.phaseRow}>
+                                        <TableCell colSpan={9} sx={styles.phaseCell}>
+                                            <Typography variant="subtitle2" color="primary.main" fontWeight="bold" sx={styles.phaseTitle}>
                                                 ❖ PHASE: {phaseName.toUpperCase()}
                                             </Typography>
                                         </TableCell>
@@ -391,9 +395,9 @@ export default function BoqBuilderTab({ projectId, openEditDialog, setFormulaHel
                         ))}
 
                         <TableBody>
-                            <TableRow sx={{ bgcolor: 'rgba(0,0,0,0.2)' }}>
-                                <TableCell colSpan={7} align="right" sx={{ fontWeight: 'bold', fontFamily: "'JetBrains Mono', monospace" }}>TOTAL_ESTIMATE:</TableCell>
-                                <TableCell sx={{ fontWeight: 'bold', color: 'success.main', fontFamily: "'JetBrains Mono', monospace" }}>
+                            <TableRow sx={styles.totalRow}>
+                                <TableCell colSpan={7} align="right" sx={styles.totalLabel}>TOTAL_ESTIMATE:</TableCell>
+                                <TableCell sx={styles.totalAmount}>
                                     {formatCurrency(Number(totalAmount) || 0)}
                                 </TableCell>
                                 <TableCell></TableCell>
