@@ -264,6 +264,7 @@ export default function ProjectWorkspace({ projectId, onBack }) {
     const computedResourceTracker = useMemo(() => {
         if (!project || !renderedProjectBoq) return {};
         const tracker = {};
+        const masterBoqCodes = new Set((masterBoqs || []).map(b => b.itemCode).filter(Boolean));
 
         // 1. Daily logs parsing
         let safeDailyLogs = [];
@@ -315,7 +316,7 @@ export default function ProjectWorkspace({ projectId, onBack }) {
                         const resId = comp.itemId;
                         const resourceData = resources.find(r => r.id === resId);
 
-                        if (resourceData) {
+                        if (resourceData && !masterBoqCodes.has(resourceData.code)) {
                             const totalRequired = Number(comp.qty) * Number(item.computedQty || 0);
 
                             if (!tracker[phase][resId]) {
@@ -344,7 +345,7 @@ export default function ProjectWorkspace({ projectId, onBack }) {
 
             if (!tracker[phase][resId]) {
                 const resourceData = resources.find(r => r.id === resId);
-                if (resourceData) {
+                if (resourceData && !masterBoqCodes.has(resourceData.code)) {
                     tracker[phase][resId] = {
                         code: resourceData.code,
                         description: resourceData.description,
@@ -358,7 +359,7 @@ export default function ProjectWorkspace({ projectId, onBack }) {
         });
 
         return { tracker, selectedBrands };
-    }, [project, renderedProjectBoq, resources]);
+    }, [project, renderedProjectBoq, resources, masterBoqs]);
 
     const handleExportResourceTracker = () => {
         const { tracker, selectedBrands } = computedResourceTracker;
@@ -408,7 +409,7 @@ export default function ProjectWorkspace({ projectId, onBack }) {
                 {activeTab === "schedule" && (<GanttScheduleTab projectId={projectId} />)}
                 {activeTab === "subcontractors" && (<SubcontractorBidTab projectId={projectId} />)}
                 {activeTab === "daily_log" && (<DailyLogTab projectId={projectId} />)}
-                {activeTab === "resources" && (<ResourceTrackerTab project={project} renderedProjectBoq={renderedProjectBoq} projectResourceMap={projectResourceMap} resources={resources} regions={regions} updateProject={updateProject} loadData={loadData} />)}
+                {activeTab === "resources" && (<ResourceTrackerTab project={project} renderedProjectBoq={renderedProjectBoq} projectResourceMap={projectResourceMap} resources={resources} regions={regions} updateProject={updateProject} loadData={loadData} masterBoqs={masterBoqs} />)}
                 {activeTab === "procurement" && (<ProcurementTab projectId={projectId} />)}
                 {activeTab === "billing" && (<ClientBillingTab projectId={projectId} />)}
                 {activeTab === "kanban" && (<KanbanBoardTab projectId={projectId} />)}

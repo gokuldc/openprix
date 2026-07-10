@@ -15,6 +15,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { useSettings } from "../../context/SettingsContext";
+import { getResourcesTabStyles, getInflationDrawerStyles } from "./ResourcesTab.styles";
 import ConfirmDeleteModal from "./ConfirmDeleteModal";
 import InflationDrawer from "./InflationDrawer";
 import BrandRatesModal from "./BrandRatesModal";
@@ -96,22 +97,19 @@ const ResourceRow = memo(({
     ghostInputStyle,
     theme
 }) => {
+    const styles = getResourcesTabStyles(theme);
     return (
-        <TableRow hover sx={{
-            bgcolor: index % 2 === 0 ? 'transparent' : alpha(theme.palette.common.white, 0.01),
-            '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.05) },
-            '& td': { borderBottom: '1px solid rgba(255,255,255,0.05)' }
-        }}>
-            <TableCell sx={{ color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
+        <TableRow hover sx={styles.resourceRow(index)}>
+            <TableCell sx={styles.indexCell}>
                 {(currentPage - 1) * itemsPerPage + index + 1}
             </TableCell>
-            <TableCell sx={{ fontWeight: 'bold', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', color: 'primary.light' }}>
+            <TableCell sx={styles.codeCell}>
                 {res.code || '---'}
             </TableCell>
-            <TableCell sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>
+            <TableCell sx={styles.descCell}>
                 {res.description}
             </TableCell>
-            <TableCell sx={{ color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>
+            <TableCell sx={styles.unitCell}>
                 {res.unit}
             </TableCell>
             {selectedRegion && (
@@ -125,15 +123,15 @@ const ResourceRow = memo(({
                 </TableCell>
             )}
 
-            <TableCell align="right" sx={{ p: '4px 16px' }}>
+            <TableCell align="right" sx={styles.actionsBox}>
                 <Box display="flex" justifyContent="flex-end" gap={0.5}>
-                    <IconButton size="small" color="primary" onClick={() => handleOpenBrandModal(res)} sx={{ opacity: 0.6, '&:hover': { opacity: 1, bgcolor: alpha(theme.palette.primary.main, 0.1) } }} title="Edit Brand Rates">
+                    <IconButton size="small" color="primary" onClick={() => handleOpenBrandModal(res)} sx={styles.editIcon} title="Edit Brand Rates">
                         <EditIcon fontSize="small" />
                     </IconButton>
-                    <IconButton size="small" color="secondary" onClick={() => handleOpenBrandChart(res)} sx={{ opacity: 0.6, '&:hover': { opacity: 1, bgcolor: alpha(theme.palette.secondary.main, 0.1) } }} title="Brand Price Chart">
+                    <IconButton size="small" color="secondary" onClick={() => handleOpenBrandChart(res)} sx={styles.chartIcon} title="Brand Price Chart">
                         <BarChartIcon fontSize="small" />
                     </IconButton>
-                    <IconButton size="small" color="error" onClick={() => openDeleteResourceModal(res.id, res.description)} sx={{ opacity: 0.6, '&:hover': { opacity: 1, bgcolor: alpha(theme.palette.error.main, 0.1) } }}>
+                    <IconButton size="small" color="error" onClick={() => openDeleteResourceModal(res.id, res.description)} sx={styles.deleteIcon}>
                         <DeleteIcon fontSize="small" />
                     </IconButton>
                 </Box>
@@ -144,6 +142,8 @@ const ResourceRow = memo(({
 
 // 🔥 HIGH-PERFORMANCE MATERIAL REGISTRATION FORM
 const RegisterMaterialForm = memo(({ onRegister }) => {
+    const theme = useTheme();
+    const styles = getResourcesTabStyles(theme);
     const [code, setCode] = useState("");
     const [desc, setDesc] = useState("");
     const [unit, setUnit] = useState("nos");
@@ -171,21 +171,7 @@ const RegisterMaterialForm = memo(({ onRegister }) => {
                     fullWidth
                     variant="contained"
                     color="primary"
-                    sx={{
-                        height: 40,
-                        fontFamily: "'JetBrains Mono', monospace",
-                        boxShadow: 'none',
-                        fontSize: '11px',
-                        fontWeight: 'bold',
-                        letterSpacing: '1px',
-                        borderRadius: 1.5,
-                        px: 2,
-                        whiteSpace: 'nowrap',
-                        background: 'linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)',
-                        '&:hover': {
-                            background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
-                        }
-                    }}
+                    sx={styles.registerButton}
                     onClick={handleRegister}
                 >
                     REGISTER_ITEM
@@ -197,6 +183,7 @@ const RegisterMaterialForm = memo(({ onRegister }) => {
 
 export default function ResourcesTab({ regions, resources, masterBoqs = [], loadData }) {
     const theme = useTheme();
+    const styles = getResourcesTabStyles(theme);
     const { formatCurrency } = useSettings();
     const fileInputRef = useRef(null);
 
@@ -553,25 +540,7 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
     };
 
     // --- STYLES FOR GHOST INPUTS ---
-    const ghostInputStyle = useMemo(() => ({
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '12px',
-        color: 'text.primary',
-        width: '100%',
-        padding: '2px 8px',
-        borderRadius: '6px',
-        transition: 'all 0.2s ease',
-        border: '1px solid transparent',
-        '&:hover': {
-            bgcolor: alpha(theme.palette.common.white, 0.05),
-            borderColor: alpha(theme.palette.common.white, 0.1)
-        },
-        '&.Mui-focused': {
-            bgcolor: alpha(theme.palette.background.default, 0.8),
-            borderColor: theme.palette.primary.main,
-            boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.2)}`
-        }
-    }), [theme]);
+    const ghostInputStyle = styles.ghostInput;
 
     const InflationDrawer = () => {
         if (!selectedResource) return null;
@@ -579,27 +548,28 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
         const latest = history.length > 0 ? history[history.length - 1].rate : 0;
         const oldest = history.length > 0 ? history[0].rate : 0;
         const trend = oldest > 0 ? ((latest - oldest) / oldest) * 100 : 0;
+        const drawerStyles = getInflationDrawerStyles(theme, trend);
 
         return (
             <Drawer anchor="right" open={!!selectedResource} onClose={() => setSelectedResource(null)} PaperProps={{ sx: { bgcolor: 'background.default', backgroundImage: 'none' } }}>
-                <Box sx={{ width: { xs: '100vw', sm: 500 }, p: { xs: 2, sm: 4 }, height: '100%' }}>
+                <Box sx={drawerStyles.drawerBox}>
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-                        <Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: { xs: '16px', sm: '20px' } }}>MARKET_ANALYTICS</Typography>
+                        <Typography variant="h6" sx={drawerStyles.drawerHeader}>MARKET_ANALYTICS</Typography>
                         <IconButton onClick={() => setSelectedResource(null)} color="inherit"><CloseIcon /></IconButton>
                     </Box>
-                    <Typography variant="h5" fontWeight="bold" color="primary.main" sx={{ fontSize: { xs: '18px', sm: '24px' } }}>{selectedResource.description}</Typography>
-                    <Typography variant="caption" sx={{ opacity: 0.6 }}>CODE: {selectedResource.code}</Typography>
+                    <Typography variant="h5" fontWeight="bold" color="primary.main" sx={drawerStyles.drawerTitle}>{selectedResource.description}</Typography>
+                    <Typography variant="caption" sx={drawerStyles.drawerSubtitle}>CODE: {selectedResource.code}</Typography>
 
                     <Box display="flex" gap={2} my={4} flexDirection={{ xs: 'column', sm: 'row' }}>
-                        <Paper elevation={0} sx={{ p: 2, flex: 1, bgcolor: alpha(theme.palette.background.paper, 0.5), border: '1px solid', borderColor: 'divider' }}>
+                        <Paper elevation={0} sx={drawerStyles.paper1}>
                             <Typography variant="caption" color="text.secondary">LATEST_PRICE</Typography>
-                            <Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace" }}>{formatCurrency(latest)}</Typography>
+                            <Typography variant="h6" sx={drawerStyles.priceText}>{formatCurrency(latest)}</Typography>
                         </Paper>
-                        <Paper elevation={0} sx={{ p: 2, flex: 1, bgcolor: alpha(theme.palette.background.paper, 0.5), border: '1px solid', borderColor: trend >= 0 ? alpha(theme.palette.error.main, 0.5) : alpha(theme.palette.success.main, 0.5) }}>
+                        <Paper elevation={0} sx={drawerStyles.paper2}>
                             <Typography variant="caption" color="text.secondary">MARKET_TREND</Typography>
                             <Box display="flex" alignItems="center" color={trend >= 0 ? 'error.main' : 'success.main'}>
                                 {trend >= 0 ? <TrendingUpIcon /> : <TrendingDownIcon />}
-                                <Typography variant="h6" ml={1} sx={{ fontFamily: "'JetBrains Mono', monospace" }}>{Math.abs(trend).toFixed(1)}%</Typography>
+                                <Typography variant="h6" ml={1} sx={drawerStyles.priceText}>{Math.abs(trend).toFixed(1)}%</Typography>
                             </Box>
                         </Paper>
                     </Box>
@@ -642,17 +612,17 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
             {/* TOP CONTROLS (IMPORT & REGIONS) */}
             <Grid container spacing={3} mb={3}>
                 <Grid item xs={12} md={6}>
-                    <Paper elevation={0} sx={{ p: 3, bgcolor: alpha(theme.palette.background.paper, 0.3), border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-                        <Typography variant="subtitle2" mb={2} color="text.secondary" sx={{ fontFamily: "'JetBrains Mono', monospace" }}>// IMPORT_EXCEL_LMR</Typography>
+                    <Paper elevation={0} sx={styles.paperCard}>
+                        <Typography variant="subtitle2" mb={2} color="text.secondary" sx={styles.monoSubtitle}>// IMPORT_EXCEL_LMR</Typography>
                         <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }}>
                             <TextField select fullWidth size="small" label="TARGET REGION" value={importRegion} onChange={e => setImportRegion(e.target.value)}>
                                 {regions.map(r => <MenuItem key={r.id} value={r.name}>{r.name}</MenuItem>)}
                             </TextField>
                             <input type="file" accept=".xlsx, .xls, .csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileUpload} />
-                            <Button variant="outlined" color="primary" startIcon={<UploadIcon />} disabled={!importRegion} onClick={() => fileInputRef.current.click()} sx={{ flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" }}>
+                            <Button variant="outlined" color="primary" startIcon={<UploadIcon />} disabled={!importRegion} onClick={() => fileInputRef.current.click()} sx={styles.actionButton}>
                                 UPLOAD_DATA
                             </Button>
-                            <Button variant="outlined" color="secondary" startIcon={<DownloadIcon />} onClick={downloadTemplate} sx={{ flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" }}>
+                            <Button variant="outlined" color="secondary" startIcon={<DownloadIcon />} onClick={downloadTemplate} sx={styles.actionButton}>
                                 DOWNLOAD_TEMPLATE
                             </Button>
                         </Box>
@@ -660,11 +630,11 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
                 </Grid>
 
                 <Grid item xs={12} md={6}>
-                    <Paper elevation={0} sx={{ p: 3, bgcolor: alpha(theme.palette.background.paper, 0.3), border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-                        <Typography variant="subtitle2" mb={2} color="text.secondary" sx={{ fontFamily: "'JetBrains Mono', monospace" }}>// MANAGE_REGIONS</Typography>
+                    <Paper elevation={0} sx={styles.paperCard}>
+                        <Typography variant="subtitle2" mb={2} color="text.secondary" sx={styles.monoSubtitle}>// MANAGE_REGIONS</Typography>
                         <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }}>
                             <TextField fullWidth size="small" label="NEW_REGION" value={newRegion} onChange={e => setNewRegion(e.target.value)} />
-                            <Button variant="contained" disabled={!newRegion} onClick={async () => { await window.api.db.createRegion(newRegion); setNewRegion(""); loadData(); }} sx={{ flexShrink: 0, fontFamily: "'JetBrains Mono', monospace", boxShadow: 'none' }}>
+                            <Button variant="contained" disabled={!newRegion} onClick={async () => { await window.api.db.createRegion(newRegion); setNewRegion(""); loadData(); }} sx={styles.addRegionButton}>
                                 ADD_REGION
                             </Button>
                         </Box>
@@ -673,11 +643,11 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
             </Grid>
 
             {/* SEARCH & QUICK ADD */}
-            <Paper elevation={0} sx={{ p: { xs: 2.5, sm: 3 }, mb: 3, bgcolor: alpha(theme.palette.background.paper, 0.3), border: '1px solid', borderColor: 'divider', borderTop: `3px solid ${theme.palette.primary.main}`, borderRadius: 2 }}>
+            <Paper elevation={0} sx={styles.searchCard}>
                 {/* SECTION 1: SEARCH & FILTERS */}
                 <Box display="flex" alignItems="center" gap={1} mb={2}>
                     <SearchIcon color="primary" fontSize="small" />
-                    <Typography variant="subtitle2" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px' }}>
+                    <Typography variant="subtitle2" fontWeight="bold" sx={styles.sectionTitle}>
                         SEARCH_AND_FILTERS
                     </Typography>
                 </Box>
@@ -710,24 +680,17 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
                                 />
                             }
                             label="Hide Empty"
-                            sx={{
-                                '& .MuiFormControlLabel-label': {
-                                    fontFamily: "'JetBrains Mono', monospace",
-                                    fontSize: '11px',
-                                    color: 'rgba(255,255,255,0.6)',
-                                    letterSpacing: '0.5px'
-                                }
-                            }}
+                            sx={styles.switchControl}
                         />
                     </Grid>
                 </Grid>
 
-                <Divider sx={{ my: 2.5, borderColor: 'rgba(255,255,255,0.06)' }} />
+                <Divider sx={styles.divider} />
 
                 {/* SECTION 2: REGISTER NEW MATERIAL */}
                 <Box display="flex" alignItems="center" gap={1} mb={2}>
                     <AddCircleOutlineIcon color="primary" fontSize="small" />
-                    <Typography variant="subtitle2" fontWeight="bold" sx={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: '1px' }}>
+                    <Typography variant="subtitle2" fontWeight="bold" sx={styles.sectionTitle}>
                         QUICK_REGISTER_NEW_MATERIAL
                     </Typography>
                 </Box>
@@ -735,20 +698,20 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
             </Paper>
 
             {/* 🔥 BEAUTIFIED EXCEL-STYLE TABLE */}
-            <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid', borderColor: 'divider', bgcolor: alpha(theme.palette.background.paper, 0.2), borderRadius: '8px 8px 0 0', overflowX: 'auto', height: 'auto' }}>
-                <Table size="small" sx={{ minWidth: 1000 }}>
-                    <TableHead sx={{ bgcolor: alpha(theme.palette.background.paper, 0.9) }}>
+            <TableContainer component={Paper} elevation={0} sx={styles.tableContainer}>
+                <Table size="small" sx={styles.table}>
+                    <TableHead sx={styles.tableHead}>
                         <TableRow>
-                            <TableCell sx={{ width: 40, color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>NO</TableCell>
-                            <TableCell sx={{ width: 120, color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>CODE</TableCell>
-                            <TableCell sx={{ color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>DESCRIPTION</TableCell>
-                            <TableCell sx={{ color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>UNIT</TableCell>
+                            <TableCell sx={styles.headerCellNo}>NO</TableCell>
+                            <TableCell sx={styles.headerCellCode}>CODE</TableCell>
+                            <TableCell sx={styles.headerCell}>DESCRIPTION</TableCell>
+                            <TableCell sx={styles.headerCell}>UNIT</TableCell>
                             {selectedRegion && (
-                                <TableCell sx={{ color: 'primary.main', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(255,255,255,0.1)', fontWeight: 'bold' }}>
+                                <TableCell sx={styles.headerCellRate}>
                                     {selectedRegion.toUpperCase()} RATE
                                 </TableCell>
                             )}
-                            <TableCell align="right" sx={{ width: 80, color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(255,255,255,0.1)' }}></TableCell>
+                            <TableCell align="right" sx={styles.headerCellRight}></TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
@@ -758,18 +721,8 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
             </TableContainer>
 
             {/* PROFESSIONAL INTEGRATED PAGINATION FOOTER */}
-            <Box display="flex" justifyContent="space-between" alignItems="center" sx={{
-                p: 2,
-                bgcolor: alpha(theme.palette.background.paper, 0.15),
-                border: '1px solid',
-                borderColor: 'divider',
-                borderTop: 'none',
-                borderRadius: '0 0 8px 8px',
-                flexDirection: { xs: 'column', sm: 'row' },
-                gap: 2,
-                mb: 3
-            }}>
-                <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: "'JetBrains Mono', monospace", fontWeight: 500 }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" sx={styles.paginationContainer}>
+                <Typography variant="caption" sx={styles.paginationText}>
                     SHOWING {startEntry}–{endEntry} OF {filteredResources.length} ENTRIES
                 </Typography>
                 <Pagination
@@ -780,21 +733,7 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
                     size="medium"
                     showFirstButton
                     showLastButton
-                    sx={{
-                        '& .MuiPaginationItem-root': {
-                            fontFamily: "'JetBrains Mono', monospace",
-                            fontSize: '12px',
-                            '&.Mui-selected': {
-                                background: 'linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)',
-                                color: '#fff',
-                                fontWeight: 'bold',
-                                boxShadow: `0 2px 8px ${alpha('#2563eb', 0.4)}`,
-                                '&:hover': {
-                                    background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
-                                }
-                            }
-                        }
-                    }}
+                    sx={styles.paginationItem}
                 />
             </Box>
 
@@ -835,15 +774,7 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
 
             {/* EXCEL UPLOAD PROGRESS OVERLAY */}
             <Backdrop
-                sx={{
-                    color: '#fff',
-                    zIndex: (theme) => theme.zIndex.drawer + 9999,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 3,
-                    background: 'rgba(5, 10, 20, 0.85)',
-                    backdropFilter: 'blur(10px)',
-                }}
+                sx={styles.backdrop}
                 open={uploadStatus.active}
             >
                 {uploadStatus.status === 'success' ? (
@@ -854,33 +785,25 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
                     <CircularProgress color="primary" size={60} thickness={4} />
                 )}
                 
-                <Box textAlign="center" sx={{ maxWidth: 400, width: '90%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <Typography variant="h6" sx={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 'bold', mb: 1, letterSpacing: '1px' }}>
+                <Box textAlign="center" sx={styles.uploadBox}>
+                    <Typography variant="h6" sx={styles.uploadTitle}>
                         {uploadStatus.status === 'success' ? "IMPORT SUCCESSFUL" : uploadStatus.status === 'error' ? "IMPORT FAILED" : "IMPORTING_EXCEL_DATA"}
                     </Typography>
                     
-                    <Typography variant="body2" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'rgba(255,255,255,0.6)', mb: 2 }}>
+                    <Typography variant="body2" sx={styles.uploadSubtitle}>
                         {uploadStatus.status === 'success' || uploadStatus.status === 'error' 
                             ? uploadStatus.message 
                             : `Processing items into [${importRegion}] market...`}
                     </Typography>
                     
                     {uploadStatus.status !== 'success' && uploadStatus.status !== 'error' && uploadStatus.total > 0 && (
-                        <Box sx={{ width: '100%', mt: 2 }}>
+                        <Box sx={styles.uploadProgressContainer}>
                             <LinearProgress
                                 variant="determinate"
                                 value={Math.round((uploadStatus.current / uploadStatus.total) * 100)}
-                                sx={{
-                                    height: 8,
-                                    borderRadius: 4,
-                                    bgcolor: 'rgba(255,255,255,0.1)',
-                                    '& .MuiLinearProgress-bar': {
-                                        borderRadius: 4,
-                                        background: 'linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%)'
-                                    }
-                                }}
+                                sx={styles.uploadProgressBar}
                             />
-                            <Typography variant="caption" sx={{ fontFamily: "'JetBrains Mono', monospace", color: 'rgba(255,255,255,0.4)', mt: 1, display: 'block' }}>
+                            <Typography variant="caption" sx={styles.uploadProgressText}>
                                 {uploadStatus.current} / {uploadStatus.total} ({Math.round((uploadStatus.current / uploadStatus.total) * 100)}%)
                             </Typography>
                         </Box>
@@ -891,7 +814,7 @@ export default function ResourcesTab({ regions, resources, masterBoqs = [], load
                             variant="contained"
                             color={uploadStatus.status === 'success' ? "primary" : "error"}
                             onClick={() => setUploadStatus(prev => ({ ...prev, active: false }))}
-                            sx={{ mt: 3, borderRadius: 50, px: 5, fontFamily: "'JetBrains Mono', monospace" }}
+                            sx={styles.uploadCloseBtn}
                         >
                             Close
                         </Button>
